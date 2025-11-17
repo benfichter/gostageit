@@ -129,6 +129,22 @@ Example Kontext request body (the script fills this in automatically using your 
 }
 ```
 
+### Advanced furniture detection (optional)
+
+The pipeline now supports richer furniture detection with MoGe geometry plus optional **SAM** and **CLIP** refinement. Enable them via environment variables:
+
+```
+export FURNITURE_USE_SAM=true
+export FURNITURE_SAM_CKPT=/workspace/checkpoints/sam_vit_h.pth
+export FURNITURE_USE_CLIP=true
+```
+
+- `FURNITURE_USE_SAM`: Refines region masks using [Segment Anything](https://github.com/facebookresearch/segment-anything). Requires the `segment-anything` package and a checkpoint file.
+- `FURNITURE_SAM_CKPT`: Path to the SAM checkpoint on disk.
+- `FURNITURE_USE_CLIP`: Classifies each detected item (sofa, chair, table, etc.) using OpenAI CLIP. Requires the `clip` package.
+
+If these packages are not installed or the env vars are unset, the detector falls back to the geometric method automatically.
+
 ---
 
 ## Main.py - Interactive Room Analysis

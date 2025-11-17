@@ -14,6 +14,7 @@ import requests
 import torch
 import dotenv
 from moge.model.v2 import MoGeModel
+from furniture_detection import FurnitureDetector, FurnitureDetectorConfig
 
 dotenv.load_dotenv()
 
@@ -438,99 +439,6 @@ def request_kontext_edit(
         time.sleep(1.0)
 
 
-def detect_furniture_regions(
-    points_calibrated: np.ndarray,
-    mask: np.ndarray,
-    normals: Optional[np.ndarray],
-    room_height: float,
-    min_area_pixels: int = 400,
-) -> List[Dict]:
-    log("Detecting furniture regions from staged depth/normal outputs...")
-    valid_mask = mask.astype(bool)
-    if normals is not None:
-        normal_y = normals[:, :, 1]
-        floor_mask = (normal_y < -0.7) & valid_mask
-        ceiling_mask = (normal_y > 0.7) & valid_mask
-        vertical_component = np.abs(normal_y)
-    else:
-        y_coords = points_calibrated[:, :, 1]
-        valid_y = y_coords[valid_mask]
-        if len(valid_y) == 0:
-            return []
-        floor_thresh = np.percentile(valid_y, 90)
-        ceil_thresh = np.percentile(valid_y, 10)
-        floor_mask = valid_mask & (y_coords >= floor_thresh)
-        ceiling_mask = valid_mask & (y_coords <= ceil_thresh)
-        vertical_component = np.zeros_like(y_coords)
-
-    structure_mask = valid_mask & ~(floor_mask | ceiling_mask)
-    if normals is not None:
-        wall_mask = structure_mask & (vertical_component <= 0.45)
-    else:
-        wall_mask = np.zeros_like(structure_mask)
-
-    furniture_mask = structure_mask & ~wall_mask
-    furniture_uint8 = (furniture_mask * 255).astype(np.uint8)
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-        furniture_uint8, connectivity=8
-    )
-
-    regions: List[Dict] = []
-    kept = 0
-
-    for label in range(1, num_labels):
-        area = stats[label, cv2.CC_STAT_AREA]
-        if area < min_area_pixels:
-            continue
-
-        component_mask = labels == label
-        object_points = points_calibrated[component_mask]
-        if len(object_points) < 20:
-            continue
-
-        x_vals = object_points[:, 0]
-        y_vals = object_points[:, 1]
-        z_vals = object_points[:, 2]
-
-        bbox_dims = {
-            "width": float(np.max(x_vals) - np.min(x_vals)),
-            "height": float(np.max(y_vals) - np.min(y_vals)),
-            "depth": float(np.max(z_vals) - np.min(z_vals)),
-        }
-
-        if bbox_dims["height"] > room_height * 0.9:
-            continue
-        if bbox_dims["width"] < 0.2 and bbox_dims["depth"] < 0.2:
-            continue
-
-        x1 = int(stats[label, cv2.CC_STAT_LEFT])
-        y1 = int(stats[label, cv2.CC_STAT_TOP])
-        w = int(stats[label, cv2.CC_STAT_WIDTH])
-        h = int(stats[label, cv2.CC_STAT_HEIGHT])
-
-        regions.append(
-            {
-                "pixel_bbox": {
-                    "x1": x1,
-                    "y1": y1,
-                    "x2": x1 + w,
-                    "y2": y1 + h,
-                },
-                "dimensions_m": bbox_dims,
-                "center": {
-                    "x": float(np.mean(x_vals)),
-                    "y": float(np.mean(y_vals)),
-                    "z": float(np.mean(z_vals)),
-                },
-                "point_count": int(len(object_points)),
-            }
-        )
-        kept += 1
-
-    log(f"Detected {kept} furniture region(s)")
-    return regions
-
-
 def annotate_furniture_boxes(
     image_rgb: np.ndarray,
     furniture_regions: List[Dict],
@@ -600,6 +508,29 @@ def save_furniture_metadata(
     with metadata_path.open("w", encoding="utf-8") as f:
         json.dump(make_json_serializable(payload), f, indent=2)
     log(f"Furniture metadata saved to {metadata_path}")
+
+
+def build_furniture_detector() -> FurnitureDetector:
+    use_sam = os.environ.get("FURNITURE_USE_SAM", "false").lower() == "true"
+    use_clip = os.environ.get("FURNITURE_USE_CLIP", "false").lower() == "true"
+    sam_ckpt = os.environ.get("FURNITURE_SAM_CKPT")
+    config = FurnitureDetectorConfig(
+        use_sam=use_sam,
+        sam_checkpoint=sam_ckpt,
+        use_clip=use_clip,
+        clip_device="cuda" if torch.cuda.is_available() else "cpu",
+    )
+    return FurnitureDetector(config, log_fn=log)
+
+
+_FURNITURE_DETECTOR: Optional[FurnitureDetector] = None
+
+
+def get_furniture_detector() -> FurnitureDetector:
+    global _FURNITURE_DETECTOR
+    if _FURNITURE_DETECTOR is None:
+        _FURNITURE_DETECTOR = build_furniture_detector()
+    return _FURNITURE_DETECTOR
 
 
 def run_bfl_pipeline(
@@ -676,7 +607,9 @@ def run_bfl_pipeline(
         label="staged",
     )
 
-    furniture_regions = detect_furniture_regions(
+    detector = get_furniture_detector()
+    furniture_regions = detector.detect(
+        image_rgb=staged_analysis["image_rgb"],
         points_calibrated=staged_analysis["points_calibrated"],
         mask=staged_analysis["mask"],
         normals=staged_analysis["normals"],
