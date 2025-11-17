@@ -622,6 +622,8 @@ def save_primary_dimension_overlay(
             items_drawn += 1
 
     if items_drawn == 0:
+        cv2.imwrite(str(output_path), cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
+        log("No primary furniture dimensions drawn; saved staged image instead.")
         return
     cv2.imwrite(str(output_path), cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
     log(f"Primary furniture dimensions saved to {output_path}")
@@ -821,7 +823,7 @@ def run_bfl_pipeline(
         output_path=sam_outline_path,
     )
 
-    primary_dims_path = output_dir / f"{image_path.stem}_primary_dimensions.png"
+    primary_dims_path = output_dir / f"{image_path.stem}_key_furniture_dimensions.png"
     save_primary_dimension_overlay(
         image_rgb=staged_analysis["image_rgb"],
         furniture_regions=furniture_regions,
