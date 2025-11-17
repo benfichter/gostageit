@@ -154,8 +154,8 @@ class Furniture3DVisualizer:
         cell_h = 360
         cell_w = 540
         canvas = np.ones((rows * cell_h + 120, cols * cell_w + 80, 3), dtype=np.uint8) * 255
-        gradient = np.linspace(230, 180, canvas.shape[0]).astype(np.uint8)
-        canvas = (canvas.transpose(2, 0, 1) * gradient / 255).transpose(1, 2, 0).astype(np.uint8)
+        gradient = np.linspace(230, 180, canvas.shape[0], dtype=np.float32).reshape(-1, 1, 1)
+        canvas = (canvas.astype(np.float32) * (gradient / 255.0)).astype(np.uint8)
         cv2.putText(canvas, "DIMENSIONS  UNIT:INCH", (40, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (80, 80, 80), 3, cv2.LINE_AA)
         for idx, box in enumerate(boxes):
             row = idx // cols
