@@ -555,6 +555,9 @@ def save_sam_outline_visualization(
     log(f"SAM outline visualization saved to {output_path}")
 
 
+METERS_TO_INCHES = 39.3701
+
+
 PRIMARY_DIMENSION_TARGETS = [
     ("Rug", {"rug"}, 1),
     ("Table", {"table"}, 1),
@@ -564,15 +567,58 @@ PRIMARY_DIMENSION_TARGETS = [
 ]
 
 
+def _region_matches_role(region: Dict, label: str) -> bool:
+    dims = region["dimensions_m"]
+    width = dims["width"]
+    depth = dims["depth"]
+    height = dims["height"]
+    footprint = width * depth
+    type_name = (region.get("type") or "").lower()
+
+    if label == "Rug":
+        if type_name == "rug":
+            return True
+        return height < 0.35 and width > 1.5 and depth > 1.0
+    if label == "Table":
+        if type_name == "table":
+            return True
+        return height < 0.8 and footprint < 3.0 and width < 3.0
+    if label == "Sofa":
+        if type_name == "sofa":
+            return True
+        return 0.6 < height < 1.5 and width > 1.5 and depth > 0.5
+    if label == "TV":
+        if type_name == "tv":
+            return True
+        return height < 1.5 and depth < 0.3 and width > 0.8
+    if label == "Cabinet/Shelves":
+        if type_name in {"cabinet", "shelving", "console"}:
+            return True
+        return height > 0.9 and depth < 1.2 and width > 0.6
+    return False
+
+
+def _select_regions_for_role(
+    regions: List[Dict], label: str, accepted_types: set[str], count: int, used_ids: set[int]
+) -> List[Dict]:
+    candidates = []
+    for region in regions:
+        region_id = id(region)
+        if region_id in used_ids:
+            continue
+        if region.get("type") in accepted_types or _region_matches_role(region, label):
+            candidates.append(region)
+    candidates.sort(key=lambda r: r["dimensions_m"]["width"] * r["dimensions_m"]["depth"], reverse=True)
+    selected = candidates[:count]
+    used_ids.update(id(r) for r in selected)
+    return selected
+
+
 def save_primary_dimension_overlay(
     image_rgb: np.ndarray,
     furniture_regions: List[Dict],
     output_path: Path,
 ) -> None:
-    def area(region: Dict) -> float:
-        dims = region["dimensions_m"]
-        return dims["width"] * dims["depth"]
-
     overlay = image_rgb.copy()
     colors = [
         (255, 255, 255),
@@ -584,31 +630,41 @@ def save_primary_dimension_overlay(
     color_iter = iter(colors)
 
     items_drawn = 0
+    used_ids: set[int] = set()
     for label, type_set, count in PRIMARY_DIMENSION_TARGETS:
-        candidates = [
-            r for r in furniture_regions if r.get("type") in type_set and r.get("dimensions_in")
-        ]
-        if not candidates:
+        matched_regions = _select_regions_for_role(
+            furniture_regions,
+            label,
+            {t.lower() for t in type_set},
+            count,
+            used_ids,
+        )
+        if not matched_regions:
             continue
-        candidates.sort(key=area, reverse=True)
         color = next(color_iter, (255, 255, 255))
-        for idx, region in enumerate(candidates[:count], start=1):
+        for idx, region in enumerate(matched_regions, start=1):
             contour = region.get("contour")
             if contour is not None:
-                if region.get("type") == "rug":
+                if label == "Rug":
                     rect = cv2.minAreaRect(np.array(contour, dtype=np.float32))
                     box = cv2.boxPoints(rect).astype(np.int32)
                     cv2.polylines(overlay, [box], True, color, 2, cv2.LINE_AA)
                 else:
                     pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
                     cv2.polylines(overlay, [pts], True, color, 2, cv2.LINE_AA)
-            dims_in = region["dimensions_in"]
+
+            dims_m = region["dimensions_m"]
+            dims_in = {
+                "width": dims_m["width"] * METERS_TO_INCHES,
+                "depth": dims_m["depth"] * METERS_TO_INCHES,
+                "height": dims_m["height"] * METERS_TO_INCHES,
+            }
             text_label = label
             if count > 1:
                 text_label = f"{label} {idx}"
             text = f"{text_label}: {dims_in['width']:.0f}\" W x {dims_in['depth']:.0f}\" D x {dims_in['height']:.0f}\" H"
             bbox = region["pixel_bbox"]
-            anchor = (bbox["x1"], max(20, bbox["y1"] - 10 - 20 * (idx - 1)))
+            anchor = (bbox["x1"], max(20, bbox["y1"] - 10 - 25 * (idx - 1)))
             cv2.putText(
                 overlay,
                 text,
