@@ -619,7 +619,6 @@ def run_bfl_pipeline(
             image_rgb=staged_analysis["image_rgb"],
             points_calibrated=staged_analysis["points_calibrated"],
             mask=staged_analysis["mask"],
-            normals=staged_analysis["normals"],
             room_height=staged_analysis["dimensions"]["height"],
         )
     else:
