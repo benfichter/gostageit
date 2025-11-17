@@ -15,6 +15,10 @@ import torch
 import dotenv
 from moge.model.v2 import MoGeModel
 from furniture_detection import detect_geometric_regions
+from sam_subject_extractor import (
+    SamSubjectExtractor,
+    SubjectExtractorUnavailable,
+)
 from furniture_3d_visualization import integrate_3d_visualization
 
 dotenv.load_dotenv()
@@ -540,6 +544,41 @@ def save_surface_visualization(
     log(f"Surface detection visualization saved to {output_path}")
 
 
+_SAM_EXTRACTOR: Optional[SamSubjectExtractor] = None
+
+
+def get_sam_extractor(
+    device: Optional[torch.device] = None,
+) -> Optional[SamSubjectExtractor]:
+    """
+    Lazily initialize Segment Anything subject extraction if configured.
+    """
+    global _SAM_EXTRACTOR
+    if _SAM_EXTRACTOR is False:
+        return None
+    if _SAM_EXTRACTOR is None:
+        checkpoint = os.getenv("SAM_CHECKPOINT_PATH")
+        if not checkpoint:
+            log("SAM subject extraction disabled: SAM_CHECKPOINT_PATH not set.")
+            _SAM_EXTRACTOR = False
+            return None
+        model_type = os.getenv("SAM_MODEL_TYPE", "vit_h")
+        target_device = device or torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
+        try:
+            _SAM_EXTRACTOR = SamSubjectExtractor(
+                checkpoint_path=Path(checkpoint),
+                model_type=model_type,
+                device=target_device,
+                log_fn=log,
+            )
+        except SubjectExtractorUnavailable as exc:
+            log(f"SAM subject extraction unavailable: {exc}")
+            _SAM_EXTRACTOR = False
+    return _SAM_EXTRACTOR or None
+
+
 def run_bfl_pipeline(
     image_path: Path,
     style_prompt: str,
@@ -574,6 +613,8 @@ def run_bfl_pipeline(
     overall_start = time.perf_counter()
     log("Starting BFL staging pipeline")
     log(f"Input image: {image_path}")
+    sam_extractor = get_sam_extractor(device=resolved_device)
+
     original_analysis = run_moge_analysis(
         model=model,
         image_path=image_path,
@@ -620,6 +661,16 @@ def run_bfl_pipeline(
         mask=staged_analysis["mask"],
         output_path=staged_surface_path,
     )
+
+    if sam_extractor:
+        subject_outputs = sam_extractor.save_subject_assets(
+            image_rgb=staged_analysis["image_rgb"],
+            output_dir=output_dir,
+            stem=staged_path.stem,
+        )
+        if subject_outputs:
+            log(f"SAM subject mask saved to {subject_outputs.mask_path}")
+            log(f"SAM subject cutout saved to {subject_outputs.cutout_path}")
 
     furniture_regions = detect_geometric_regions(
         points_calibrated=staged_analysis["points_calibrated"],

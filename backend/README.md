@@ -152,6 +152,28 @@ Optional extras:
 - `pip install alphashape` to tighten outlines for irregular objects
 - `pip install open3d` to emit meshes/PLY files (hooks live in `furniture_3d_visualization.py`)
 
+### Subject lift via Segment Anything
+
+If you want Apple-style “hold to lift subject” assets for each staged render, enable the new SAM integration:
+
+1. Install requirements (the list now includes the Segment Anything repo):  
+   `pip install -r backend/requirements.txt`
+2. Download a SAM checkpoint (e.g. `sam_vit_h_4b8939.pth`) from the [official release](https://github.com/facebookresearch/segment-anything#model-checkpoints) and place it somewhere accessible to the pod.
+3. Export environment variables (or add them to `.env`):
+   ```bash
+   export SAM_CHECKPOINT_PATH=/workspace/checkpoints/sam_vit_h_4b8939.pth
+   # Optional: vit_h (default), vit_l, or vit_b
+   export SAM_MODEL_TYPE=vit_h
+   ```
+
+When those variables are set the pipeline loads SAM once and, after BFL staging, produces:
+
+- `*_subject_mask.png` - the binary segmentation mask
+- `*_subject_overlay.png` - staged render with everything but the main subject dimmed
+- `*_subject.png` - RGBA cutout you can drag/drop similar to iOS Photos
+
+If the dependency or checkpoint is missing the rest of the pipeline still runs; only the subject cutouts are skipped.
+
 ---
 
 ## Main.py - Interactive Room Analysis
