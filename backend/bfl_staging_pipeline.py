@@ -716,7 +716,15 @@ def select_regions_via_gemini(
             ],
         )
         text = response.text.strip()
-        selection = json.loads(text)
+        try:
+            selection = json.loads(text)
+        except json.JSONDecodeError:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                selection = json.loads(text[start : end + 1])
+            else:
+                raise
         region_ids = selection.get("region_ids")
         if not isinstance(region_ids, list):
             raise ValueError("Gemini response missing region_ids list")
