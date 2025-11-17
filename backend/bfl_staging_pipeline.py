@@ -522,6 +522,28 @@ def save_furniture_metadata(
     log(f"Furniture metadata saved to {metadata_path}")
 
 
+def save_surface_visualization(
+    normals: Optional[np.ndarray],
+    mask: np.ndarray,
+    output_path: Path,
+) -> None:
+    if normals is None:
+        return
+
+    normal_y = normals[:, :, 1]
+    valid_mask = mask.astype(bool)
+    floor_mask = (normal_y < -0.7) & valid_mask
+    ceiling_mask = (normal_y > 0.7) & valid_mask
+
+    surface_vis = np.zeros((mask.shape[0], mask.shape[1], 3), dtype=np.uint8)
+    surface_vis[floor_mask] = [255, 0, 0]
+    surface_vis[ceiling_mask] = [0, 255, 0]
+    surface_vis[(~floor_mask) & (~ceiling_mask) & valid_mask] = [100, 100, 100]
+
+    cv2.imwrite(str(output_path), surface_vis)
+    log(f"Surface detection visualization saved to {output_path}")
+
+
 _GEMINI_LABELER = None
 
 
@@ -608,6 +630,13 @@ def run_bfl_pipeline(
         device=resolved_device,
         true_height=ceiling_height,
         label="staged",
+    )
+
+    staged_surface_path = output_dir / f"{image_path.stem}_surface_staged.png"
+    save_surface_visualization(
+        normals=staged_analysis["normals"],
+        mask=staged_analysis["mask"],
+        output_path=staged_surface_path,
     )
 
     furniture_regions = detect_geometric_regions(
