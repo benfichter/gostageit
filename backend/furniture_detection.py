@@ -65,7 +65,7 @@ class FurnitureDetector:
         sam_extractor: SamSubjectExtractor,
         log_fn: Callable[[str], None] = default_log,
         min_area_ratio: float = 0.01,
-        max_area_ratio: float = 0.55,
+        max_area_ratio: float = 0.35,
         min_points: int = 200,
         max_regions: int = 15,
         max_iou: float = 0.7,
@@ -115,6 +115,14 @@ class FurnitureDetector:
                 continue
 
             segmentation = mask_data["segmentation"].astype(bool)
+            contour = self._extract_primary_contour(segmentation)
+            if contour is None:
+                continue
+
+            bbox = self._contour_to_bbox(contour, image_w, image_h)
+            if self._touches_border(bbox, image_w, image_h):
+                continue
+
             object_mask = segmentation & valid_mask
             if np.count_nonzero(object_mask) < self.min_points:
                 continue
@@ -124,12 +132,12 @@ class FurnitureDetector:
                 continue
             dims, center = dims_center
 
-            bbox = self._sam_bbox_to_dict(mask_data["bbox"], image_w, image_h)
             if any(_bbox_iou(bbox, existing) > self.max_iou for existing in selected_bboxes):
                 continue
 
             region = {
                 "pixel_bbox": bbox,
+                "contour": contour.tolist(),
                 "dimensions_m": dims,
                 "center": center,
                 "point_count": int(np.count_nonzero(object_mask)),
@@ -173,19 +181,33 @@ class FurnitureDetector:
         return dims, center
 
     @staticmethod
-    def _sam_bbox_to_dict(
-        bbox: Tuple[int, int, int, int], image_w: int, image_h: int
-    ) -> Dict[str, int]:
-        x, y, w, h = bbox
+    def _extract_primary_contour(mask: np.ndarray) -> Optional[np.ndarray]:
+        mask_u8 = mask.astype(np.uint8)
+        contours, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+        largest = max(contours, key=cv2.contourArea)
+        if cv2.contourArea(largest) < 50:
+            return None
+        return largest.squeeze(axis=1).astype(np.int32)
+
+    @staticmethod
+    def _contour_to_bbox(contour: np.ndarray, image_w: int, image_h: int) -> Dict[str, int]:
+        x, y, w, h = cv2.boundingRect(contour.astype(np.int32))
         x1 = int(np.clip(x, 0, image_w - 1))
         y1 = int(np.clip(y, 0, image_h - 1))
         x2 = int(np.clip(x + w, 0, image_w - 1))
         y2 = int(np.clip(y + h, 0, image_h - 1))
-        if x2 <= x1:
-            x2 = min(image_w - 1, x1 + 1)
-        if y2 <= y1:
-            y2 = min(image_h - 1, y1 + 1)
         return {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+
+    @staticmethod
+    def _touches_border(bbox: Dict[str, int], image_w: int, image_h: int, margin: int = 4) -> bool:
+        return (
+            bbox["x1"] <= margin
+            or bbox["y1"] <= margin
+            or bbox["x2"] >= image_w - margin
+            or bbox["y2"] >= image_h - margin
+        )
 
 
 def detect_geometric_regions(
@@ -293,4 +315,3 @@ __all__ = [
     "FurnitureDetectorUnavailable",
     "detect_geometric_regions",
 ]
-

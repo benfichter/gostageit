@@ -136,6 +136,7 @@ Furniture segmentation now relies on Meta's Segment Anything (SAM) while MoGe re
 1. Run SAM on the staged render to obtain dozens of object masks (no cloud APIs required).
 2. Filter masks by size/overlap and keep up to 15 furniture segments.
 3. Use MoGe's calibrated point cloud inside each segment to compute width × depth × height plus centers.
+4. Draw the actual SAM contour (not just a rectangular box) on the overlay/comparison outputs so angled rugs, shelves, etc. follow their true edges.
 
 To enable it:
 
@@ -147,6 +148,11 @@ export SAM_MODEL_TYPE=vit_h
 ```
 
 If `SAM_CHECKPOINT_PATH` is missing the pipeline aborts before staging, since SAM now provides every furniture mask.
+
+Outputs from this step include:
+
+- `*_sam_outlines.png` – SAM mask contours drawn directly on the staged photo (no MoGe dimensions), useful to inspect the raw segmentation before measurement.
+- `*_subject_mask.png` / `*_subject_overlay.png` / `*_subject.png` – Apple-style cutouts driven by the same SAM run.
 
 ### 3D furniture outlines
 

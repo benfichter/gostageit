@@ -471,13 +471,18 @@ def annotate_furniture_boxes(
         dims = region["dimensions_m"]
         color = color_palette[(idx - 1) % len(color_palette)]
 
-        cv2.rectangle(
-            overlay,
-            (bbox["x1"], bbox["y1"]),
-            (bbox["x2"], bbox["y2"]),
-            color,
-            2,
-        )
+        contour = region.get("contour")
+        if contour:
+            pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
+            cv2.polylines(overlay, [pts], True, color, 2, cv2.LINE_AA)
+        else:
+            cv2.rectangle(
+                overlay,
+                (bbox["x1"], bbox["y1"]),
+                (bbox["x2"], bbox["y2"]),
+                color,
+                2,
+            )
 
         label_parts = []
         item_name = region.get("type")
@@ -505,6 +510,49 @@ def annotate_furniture_boxes(
 
     cv2.imwrite(str(output_path), cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
     log(f"Annotated furniture overlay saved to {output_path}")
+
+
+def save_sam_outline_visualization(
+    image_rgb: np.ndarray,
+    furniture_regions: List[Dict],
+    output_path: Path,
+) -> None:
+    if not furniture_regions:
+        cv2.imwrite(str(output_path), cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
+        log("No SAM furniture regions detected – saved staged image without outlines.")
+        return
+
+    overlay = image_rgb.copy()
+    color_palette = [
+        (255, 99, 71),
+        (60, 179, 113),
+        (65, 105, 225),
+        (218, 165, 32),
+        (238, 130, 238),
+        (0, 255, 255),
+    ]
+
+    for idx, region in enumerate(furniture_regions, start=1):
+        contour = region.get("contour")
+        if not contour:
+            continue
+        color = color_palette[(idx - 1) % len(color_palette)]
+        pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
+        cv2.polylines(overlay, [pts], True, color, 3, cv2.LINE_AA)
+        text_origin = tuple(pts[0, 0])
+        cv2.putText(
+            overlay,
+            f"SAM {idx}",
+            text_origin,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            color,
+            1,
+            cv2.LINE_AA,
+        )
+
+    cv2.imwrite(str(output_path), cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
+    log(f"SAM outline visualization saved to {output_path}")
 
 
 def save_furniture_metadata(
@@ -692,6 +740,13 @@ def run_bfl_pipeline(
         points_calibrated=staged_analysis["points_calibrated"],
         depth_mask=staged_analysis["mask"],
         normals=staged_analysis["normals"],
+    )
+
+    sam_outline_path = output_dir / f"{image_path.stem}_sam_outlines.png"
+    save_sam_outline_visualization(
+        image_rgb=staged_analysis["image_rgb"],
+        furniture_regions=furniture_regions,
+        output_path=sam_outline_path,
     )
 
     viz_outputs = integrate_3d_visualization(

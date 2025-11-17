@@ -196,8 +196,13 @@ class Furniture3DVisualizer:
         canvas = np.ones((h, w * 2, 3), dtype=np.uint8) * 255
         left = image_rgb.copy()
         for region in furniture_regions:
-            box = region["pixel_bbox"]
-            cv2.rectangle(left, (box["x1"], box["y1"]), (box["x2"], box["y2"]), (0, 0, 255), 2)
+            contour = region.get("contour")
+            if contour:
+                pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
+                cv2.polylines(left, [pts], True, (0, 0, 255), 2, cv2.LINE_AA)
+            else:
+                box = region["pixel_bbox"]
+                cv2.rectangle(left, (box["x1"], box["y1"]), (box["x2"], box["y2"]), (0, 0, 255), 2)
         right = image_rgb.copy()
         colors = [
             (255, 99, 71),
