@@ -16,6 +16,7 @@ import dotenv
 from moge.model.v2 import MoGeModel
 from furniture_detection import (
     FurnitureDetectionUnavailable,
+    FurnitureDetector,
     build_detector_from_env,
 )
 
