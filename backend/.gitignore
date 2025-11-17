@@ -1,0 +1,49 @@
+# Environment variables (contains sensitive API keys)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.lock
+*.log
+*.body
+.cache/
+.claude/
+
+outut/
+outputs/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Output files
+output_*.png
+mask_*.png
+*.npy
+calibrated_points.npy
+room_dimensions.txt
+surface_detection.png
+height_map.png
+floor_plan.png
+ceiling_corners.png
+annotated_dimensions.png
+distance_measurement.png
+layout_debug.png
+furnished_room.png
+occupancy_grid.png
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
