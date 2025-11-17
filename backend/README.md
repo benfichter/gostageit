@@ -131,18 +131,26 @@ Example Kontext request body (the script fills this in automatically using your 
 
 ### Furniture bounding boxes via MoGe (default)
 
-We now keep the entire detection loop on-device: MoGe produces the metric point cloud, and we segment furniture directly from the depth/normal fields. The detector:
+Furniture segmentation now relies on Meta's Segment Anything (SAM) while MoGe remains the source of metric truth. The flow:
 
-- Removes floor/ceiling points using surface normals
-- Detects depth discontinuities to separate furniture from walls
-- Runs connected-component analysis on the remaining points
-- Estimates each region's 3D footprint/height to classify it (rug, shelving, sofa, etc.)
+1. Run SAM on the staged render to obtain dozens of object masks (no cloud APIs required).
+2. Filter masks by size/overlap and keep up to 15 furniture segments.
+3. Use MoGe's calibrated point cloud inside each segment to compute width × depth × height plus centers.
 
-All bounding boxes, labels, and measurements flow from that single MoGe pass - no external APIs or credentials are required.
+To enable it:
+
+```bash
+pip install -r backend/requirements.txt                      # installs SAM repo
+export SAM_CHECKPOINT_PATH=/workspace/sam_vit_h_4b8939.pth   # download from SAM release notes
+# Optional override: vit_h (default), vit_l, or vit_b
+export SAM_MODEL_TYPE=vit_h
+```
+
+If `SAM_CHECKPOINT_PATH` is missing the pipeline aborts before staging, since SAM now provides every furniture mask.
 
 ### 3D furniture outlines
 
-After the MoGe detector segments each furniture cluster, we project the calibrated 3D bounding boxes back into the staged photo. This produces perspective-correct outlines - even for angled rugs or tall shelves - and the pipeline writes:
+After SAM segments each furniture cluster, we project the calibrated 3D bounding boxes back into the staged photo. This produces perspective-correct outlines - even for angled rugs or tall shelves - and the pipeline writes:
 
 - `*_3d_boxes.png` – staged image with 3D wireframes
 - `*_3d_data.json` – list of centers/corners/metrics for every furniture box
@@ -154,25 +162,13 @@ Optional extras:
 
 ### Subject lift via Segment Anything
 
-If you want Apple-style “hold to lift subject” assets for each staged render, enable the new SAM integration:
-
-1. Install requirements (the list now includes the Segment Anything repo):  
-   `pip install -r backend/requirements.txt`
-2. Download a SAM checkpoint (e.g. `sam_vit_h_4b8939.pth`) from the [official release](https://github.com/facebookresearch/segment-anything#model-checkpoints) and place it somewhere accessible to the pod.
-3. Export environment variables (or add them to `.env`):
-   ```bash
-   export SAM_CHECKPOINT_PATH=/workspace/checkpoints/sam_vit_h_4b8939.pth
-   # Optional: vit_h (default), vit_l, or vit_b
-   export SAM_MODEL_TYPE=vit_h
-   ```
-
-When those variables are set the pipeline loads SAM once and, after BFL staging, produces:
+With the same SAM configuration above, the pipeline can also emit Apple-style "hold to lift subject" assets for each staged render. After staging it produces:
 
 - `*_subject_mask.png` - the binary segmentation mask
 - `*_subject_overlay.png` - staged render with everything but the main subject dimmed
 - `*_subject.png` - RGBA cutout you can drag/drop similar to iOS Photos
 
-If the dependency or checkpoint is missing the rest of the pipeline still runs; only the subject cutouts are skipped.
+If SAM is unavailable the subject cutouts are skipped (and, now that detection depends on SAM, the main pipeline will stop early with a helpful message).
 
 ---
 

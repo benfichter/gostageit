@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -184,10 +184,15 @@ class SamSubjectExtractor:
         rgba = np.concatenate([image_rgb, alpha], axis=2)
         Image.fromarray(rgba).save(path)
 
+    def generate_masks(self, image_rgb: np.ndarray) -> List[Dict]:
+        """
+        Generate all SAM masks for downstream processing (e.g., furniture detection).
+        """
+        return self.mask_generator.generate(image_rgb)
+
 
 __all__ = [
     "SamSubjectExtractor",
     "SubjectExtractorUnavailable",
     "SubjectExtractionResult",
 ]
-

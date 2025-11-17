@@ -14,7 +14,10 @@ import requests
 import torch
 import dotenv
 from moge.model.v2 import MoGeModel
-from furniture_detection import detect_geometric_regions
+from furniture_detection import (
+    FurnitureDetector,
+    FurnitureDetectorUnavailable,
+)
 from sam_subject_extractor import (
     SamSubjectExtractor,
     SubjectExtractorUnavailable,
@@ -614,6 +617,18 @@ def run_bfl_pipeline(
     log("Starting BFL staging pipeline")
     log(f"Input image: {image_path}")
     sam_extractor = get_sam_extractor(device=resolved_device)
+    if sam_extractor is None:
+        raise RuntimeError(
+            "SAM-based furniture detection requires SAM_CHECKPOINT_PATH. "
+            "Please download a SAM checkpoint and set SAM_CHECKPOINT_PATH before running."
+        )
+    try:
+        furniture_detector = FurnitureDetector(
+            sam_extractor=sam_extractor,
+            log_fn=log,
+        )
+    except FurnitureDetectorUnavailable as exc:
+        raise RuntimeError(f"SAM furniture detector unavailable: {exc}") from exc
 
     original_analysis = run_moge_analysis(
         model=model,
@@ -672,12 +687,11 @@ def run_bfl_pipeline(
             log(f"SAM subject mask saved to {subject_outputs.mask_path}")
             log(f"SAM subject cutout saved to {subject_outputs.cutout_path}")
 
-    furniture_regions = detect_geometric_regions(
+    furniture_regions = furniture_detector.detect(
+        image_rgb=staged_analysis["image_rgb"],
         points_calibrated=staged_analysis["points_calibrated"],
-        mask=staged_analysis["mask"],
+        depth_mask=staged_analysis["mask"],
         normals=staged_analysis["normals"],
-        room_height=staged_analysis["dimensions"]["height"],
-        log_fn=log,
     )
 
     viz_outputs = integrate_3d_visualization(

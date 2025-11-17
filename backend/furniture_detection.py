@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from typing import Callable, Dict, List, Optional, Tuple
+
 import cv2
 import numpy as np
-from typing import Callable, Dict, List, Optional
+
+from sam_subject_extractor import SamSubjectExtractor
 
 
 def default_log(message: str) -> None:
@@ -30,6 +33,161 @@ def classify_region(dimensions: Dict[str, float]) -> str:
     return "furniture"
 
 
+class FurnitureDetectorUnavailable(RuntimeError):
+    """Raised when SAM is not configured for furniture detection."""
+
+
+def _bbox_iou(box_a: Dict[str, int], box_b: Dict[str, int]) -> float:
+    ax1, ay1, ax2, ay2 = box_a["x1"], box_a["y1"], box_a["x2"], box_a["y2"]
+    bx1, by1, bx2, by2 = box_b["x1"], box_b["y1"], box_b["x2"], box_b["y2"]
+
+    inter_x1 = max(ax1, bx1)
+    inter_y1 = max(ay1, by1)
+    inter_x2 = min(ax2, bx2)
+    inter_y2 = min(ay2, by2)
+
+    if inter_x2 <= inter_x1 or inter_y2 <= inter_y1:
+        return 0.0
+
+    inter_area = (inter_x2 - inter_x1) * (inter_y2 - inter_y1)
+    area_a = (ax2 - ax1) * (ay2 - ay1)
+    area_b = (bx2 - bx1) * (by2 - by1)
+    return inter_area / max(area_a + area_b - inter_area, 1e-6)
+
+
+class FurnitureDetector:
+    """
+    Uses Segment Anything masks for segmentation and MoGe points for dimensions.
+    """
+
+    def __init__(
+        self,
+        sam_extractor: SamSubjectExtractor,
+        log_fn: Callable[[str], None] = default_log,
+        min_area_ratio: float = 0.01,
+        max_area_ratio: float = 0.55,
+        min_points: int = 200,
+        max_regions: int = 15,
+        max_iou: float = 0.7,
+    ) -> None:
+        if sam_extractor is None:
+            raise FurnitureDetectorUnavailable(
+                "SAM extractor is required for furniture detection."
+            )
+        self.sam = sam_extractor
+        self.log = log_fn or default_log
+        self.min_area_ratio = min_area_ratio
+        self.max_area_ratio = max_area_ratio
+        self.min_points = min_points
+        self.max_regions = max_regions
+        self.max_iou = max_iou
+
+    def detect(
+        self,
+        image_rgb: np.ndarray,
+        points_calibrated: np.ndarray,
+        depth_mask: np.ndarray,
+        normals: Optional[np.ndarray] = None,
+    ) -> List[Dict]:
+        self.log("Detecting furniture via Segment Anything masks...")
+        image_h, image_w = image_rgb.shape[:2]
+        valid_mask = depth_mask.astype(bool)
+        valid_mask &= np.isfinite(points_calibrated[:, :, 0])
+        valid_mask &= np.isfinite(points_calibrated[:, :, 1])
+        valid_mask &= np.isfinite(points_calibrated[:, :, 2])
+
+        image_area = image_h * image_w
+        min_area = image_area * self.min_area_ratio
+        max_area = image_area * self.max_area_ratio
+
+        masks = self.sam.generate_masks(image_rgb)
+        if not masks:
+            self.log("SAM returned no masks for this image.")
+            return []
+
+        masks = sorted(masks, key=lambda m: m["area"], reverse=True)
+        regions: List[Dict] = []
+        selected_bboxes: List[Dict[str, int]] = []
+
+        for mask_data in masks:
+            area = mask_data.get("area", 0)
+            if area < min_area or area > max_area:
+                continue
+
+            segmentation = mask_data["segmentation"].astype(bool)
+            object_mask = segmentation & valid_mask
+            if np.count_nonzero(object_mask) < self.min_points:
+                continue
+
+            dims_center = self._compute_dimensions(points_calibrated, object_mask)
+            if dims_center is None:
+                continue
+            dims, center = dims_center
+
+            bbox = self._sam_bbox_to_dict(mask_data["bbox"], image_w, image_h)
+            if any(_bbox_iou(bbox, existing) > self.max_iou for existing in selected_bboxes):
+                continue
+
+            region = {
+                "pixel_bbox": bbox,
+                "dimensions_m": dims,
+                "center": center,
+                "point_count": int(np.count_nonzero(object_mask)),
+                "mask": object_mask,
+                "confidence": float(mask_data.get("predicted_iou", 0.0)),
+                "type": classify_region(dims),
+                "sam_area": int(area),
+            }
+            regions.append(region)
+            selected_bboxes.append(bbox)
+
+            if len(regions) >= self.max_regions:
+                break
+
+        self.log(f"Detected {len(regions)} furniture region(s) via SAM.")
+        return regions
+
+    def _compute_dimensions(
+        self,
+        points_calibrated: np.ndarray,
+        mask: np.ndarray,
+    ) -> Optional[Tuple[Dict[str, float], Dict[str, float]]]:
+        object_points = points_calibrated[mask]
+        if len(object_points) < self.min_points:
+            return None
+
+        x_vals = object_points[:, 0]
+        y_vals = object_points[:, 1]
+        z_vals = object_points[:, 2]
+
+        dims = {
+            "width": float(np.max(x_vals) - np.min(x_vals)),
+            "height": float(np.max(y_vals) - np.min(y_vals)),
+            "depth": float(np.max(z_vals) - np.min(z_vals)),
+        }
+        center = {
+            "x": float(np.mean(x_vals)),
+            "y": float(np.mean(y_vals)),
+            "z": float(np.mean(z_vals)),
+        }
+        return dims, center
+
+    @staticmethod
+    def _sam_bbox_to_dict(
+        bbox: Tuple[int, int, int, int], image_w: int, image_h: int
+    ) -> Dict[str, int]:
+        x, y, w, h = bbox
+        x1 = int(np.clip(x, 0, image_w - 1))
+        y1 = int(np.clip(y, 0, image_h - 1))
+        x2 = int(np.clip(x + w, 0, image_w - 1))
+        y2 = int(np.clip(y + h, 0, image_h - 1))
+        if x2 <= x1:
+            x2 = min(image_w - 1, x1 + 1)
+        if y2 <= y1:
+            y2 = min(image_h - 1, y1 + 1)
+        return {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+
+
 def detect_geometric_regions(
     points_calibrated: np.ndarray,
     mask: np.ndarray,
@@ -38,6 +196,9 @@ def detect_geometric_regions(
     log_fn: Callable[[str], None] = default_log,
     min_area_pixels: int = 400,
 ) -> List[Dict]:
+    """
+    Legacy depth-only fallback remaining for reference/testing.
+    """
     log = log_fn
     log("Detecting furniture using MoGe depth/normal geometry...")
 
@@ -127,4 +288,9 @@ def detect_geometric_regions(
     return regions
 
 
-__all__ = ["detect_geometric_regions"]
+__all__ = [
+    "FurnitureDetector",
+    "FurnitureDetectorUnavailable",
+    "detect_geometric_regions",
+]
+
