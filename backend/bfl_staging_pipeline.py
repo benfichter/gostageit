@@ -605,6 +605,16 @@ def encode_image_png(image_rgb: np.ndarray) -> bytes:
 METERS_TO_INCHES = 39.3701
 
 
+def format_inches(value_in_inches: float) -> str:
+    total_inches = int(round(value_in_inches))
+    feet = total_inches // 12
+    inches = total_inches % 12
+    if inches == 12:
+        feet += 1
+        inches = 0
+    return f"{feet}' {inches}\""
+
+
 PRIMARY_DIMENSION_TARGETS = [
     ("Rug", {"rug"}, 1),
     ("Table", {"table"}, 1),
@@ -795,7 +805,10 @@ def save_primary_dimension_overlay(
             "depth": dims_m["depth"] * METERS_TO_INCHES,
             "height": dims_m["height"] * METERS_TO_INCHES,
         }
-        text = f"{label}: {dims_in['width']:.0f}\" W x {dims_in['depth']:.0f}\" D x {dims_in['height']:.0f}\" H"
+        text = (
+            f"{label}: {format_inches(dims_in['width'])} W x "
+            f"{format_inches(dims_in['depth'])} D x {format_inches(dims_in['height'])} H"
+        )
         bbox = region["pixel_bbox"]
         anchor = (bbox["x1"], max(20, bbox["y1"] - 10))
         cv2.putText(
