@@ -162,6 +162,8 @@ export GOOGLE_API_KEY=sk-your-genai-key
 # Or configure Vertex routing as usual:
 # export GOOGLE_CLOUD_PROJECT=...
 # export GOOGLE_GENAI_USE_VERTEXAI=True
+# Optional override (defaults to gemini-2.0-flash-lite):
+# export GEMINI_SELECTION_MODEL=gemini-1.5-flash
 ```
 
 With that in place, the pipeline uploads a numbered SAM overlay and candidate metadata, asks Gemini to choose the five most important furniture items, and only labels those pieces.

@@ -665,7 +665,7 @@ def select_regions_via_gemini(
     image_rgb: np.ndarray,
     furniture_regions: List[Dict],
     log_fn: Callable[[str], None],
-    model_name: str = "gemini-1.5-flash",
+    model_name: str = "gemini-2.0-flash-lite",
 ) -> Optional[List[int]]:
     if genai is None:
         log_fn("Gemini package not available; skipping AI selection.")
