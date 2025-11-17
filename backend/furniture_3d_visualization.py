@@ -38,9 +38,14 @@ class Furniture3DVisualizer:
     def _project(self, pts_3d: np.ndarray, image_shape: Tuple[int, int]) -> np.ndarray:
         if self.intrinsics is None:
             self.intrinsics = self._estimate_intrinsics(image_shape)
-        pts_h = np.hstack([pts_3d, np.ones((len(pts_3d), 1))])
-        proj = (self.intrinsics @ pts_h.T).T
-        pts_2d = proj[:, :2] / proj[:, 2:3]
+        fx = self.intrinsics[0, 0]
+        fy = self.intrinsics[1, 1]
+        cx = self.intrinsics[0, 2]
+        cy = self.intrinsics[1, 2]
+        z = np.clip(pts_3d[:, 2], 1e-6, None)
+        x = (pts_3d[:, 0] / z) * fx + cx
+        y = (pts_3d[:, 1] / z) * fy + cy
+        pts_2d = np.stack([x, y], axis=1)
         return pts_2d.astype(int)
 
     def _axis_aligned_box(self, pts: np.ndarray) -> BoundingBox3D:
