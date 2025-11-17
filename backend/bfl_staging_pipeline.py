@@ -24,6 +24,12 @@ from sam_subject_extractor import (
 )
 from furniture_3d_visualization import integrate_3d_visualization
 
+try:
+    from google import genai
+    from google.genai.types import Part
+except ImportError:
+    genai = None
+
 dotenv.load_dotenv()
 
 
@@ -555,6 +561,47 @@ def save_sam_outline_visualization(
     log(f"SAM outline visualization saved to {output_path}")
 
 
+def render_numbered_sam_overlay(
+    image_rgb: np.ndarray, furniture_regions: List[Dict]
+) -> np.ndarray:
+    overlay = image_rgb.copy()
+    colors = [
+        (255, 99, 71),
+        (60, 179, 113),
+        (65, 105, 225),
+        (255, 215, 0),
+        (238, 130, 238),
+        (0, 255, 255),
+    ]
+    for idx, region in enumerate(furniture_regions):
+        contour = region.get("contour")
+        if not contour:
+            continue
+        pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
+        color = colors[idx % len(colors)]
+        cv2.polylines(overlay, [pts], True, color, 2, cv2.LINE_AA)
+        centroid = np.mean(np.array(contour), axis=0).astype(int)
+        label = f"{region.get('region_id', idx + 1)}"
+        cv2.putText(
+            overlay,
+            label,
+            tuple(centroid),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            color,
+            2,
+            cv2.LINE_AA,
+        )
+    return overlay
+
+
+def encode_image_png(image_rgb: np.ndarray) -> bytes:
+    success, buffer = cv2.imencode(".png", cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
+    if not success:
+        raise RuntimeError("Failed to encode overlay image.")
+    return buffer.tobytes()
+
+
 METERS_TO_INCHES = 39.3701
 
 
@@ -614,10 +661,77 @@ def _select_regions_for_role(
     return selected
 
 
+def select_regions_via_gemini(
+    image_rgb: np.ndarray,
+    furniture_regions: List[Dict],
+    log_fn: Callable[[str], None],
+    model_name: str = "gemini-1.5-flash",
+) -> Optional[List[int]]:
+    if genai is None:
+        log_fn("Gemini package not available; skipping AI selection.")
+        return None
+
+    api_key = os.getenv("GOOGLE_API_KEY")
+    use_vertex = os.getenv("GOOGLE_GENAI_USE_VERTEXAI")
+    if not api_key and not use_vertex:
+        log_fn("Gemini selection disabled: GOOGLE_API_KEY or Vertex env variables not set.")
+        return None
+
+    try:
+        client = genai.Client()
+    except Exception as exc:
+        log_fn(f"Failed to initialize Gemini client: {exc}")
+        return None
+
+    overlay = render_numbered_sam_overlay(image_rgb, furniture_regions)
+    try:
+        overlay_bytes = encode_image_png(overlay)
+    except Exception as exc:
+        log_fn(f"Failed to encode SAM overlay for Gemini selection: {exc}")
+        return None
+
+    summaries = []
+    for region in furniture_regions:
+        dims = region["dimensions_m"]
+        area_m2 = dims["width"] * dims["depth"]
+        summaries.append(
+            f"{region.get('region_id')}: type={region.get('type','unknown')}, "
+            f"width={dims['width']:.2f}m, depth={dims['depth']:.2f}m, height={dims['height']:.2f}m, footprint={area_m2:.2f}m^2"
+        )
+
+    prompt = (
+        "You are an interior designer. The image shows a staged room with numbered SAM masks. "
+        "Select the five most important furniture pieces (prioritize sofas, rugs, tables, media consoles/TVs, cabinets or shelves). "
+        "Return JSON like {\"region_ids\": [3,7,11,4,1]}. "
+        "Here are the candidate summaries:\n"
+        + "\n".join(summaries)
+    )
+
+    try:
+        response = client.models.generate_content(
+            model=os.getenv("GEMINI_SELECTION_MODEL", model_name),
+            contents=[
+                Part.from_bytes(data=overlay_bytes, mime_type="image/png"),
+                prompt,
+            ],
+        )
+        text = response.text.strip()
+        selection = json.loads(text)
+        region_ids = selection.get("region_ids")
+        if not isinstance(region_ids, list):
+            raise ValueError("Gemini response missing region_ids list")
+        log_fn(f"Gemini selected region IDs: {region_ids}")
+        return [int(rid) for rid in region_ids if isinstance(rid, (int, float))]
+    except Exception as exc:
+        log_fn(f"Gemini selection failed: {exc}")
+        return None
+
+
 def save_primary_dimension_overlay(
     image_rgb: np.ndarray,
     furniture_regions: List[Dict],
     output_path: Path,
+    selected_region_ids: Optional[List[int]] = None,
 ) -> None:
     overlay = image_rgb.copy()
     colors = [
@@ -629,58 +743,66 @@ def save_primary_dimension_overlay(
     ]
     color_iter = iter(colors)
 
-    items_drawn = 0
-    used_ids: set[int] = set()
-    for label, type_set, count in PRIMARY_DIMENSION_TARGETS:
-        matched_regions = _select_regions_for_role(
-            furniture_regions,
-            label,
-            {t.lower() for t in type_set},
-            count,
-            used_ids,
-        )
-        if not matched_regions:
-            continue
-        color = next(color_iter, (255, 255, 255))
-        for idx, region in enumerate(matched_regions, start=1):
-            contour = region.get("contour")
-            if contour is not None:
-                if label == "Rug":
-                    rect = cv2.minAreaRect(np.array(contour, dtype=np.float32))
-                    box = cv2.boxPoints(rect).astype(np.int32)
-                    cv2.polylines(overlay, [box], True, color, 2, cv2.LINE_AA)
-                else:
-                    pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
-                    cv2.polylines(overlay, [pts], True, color, 2, cv2.LINE_AA)
-
-            dims_m = region["dimensions_m"]
-            dims_in = {
-                "width": dims_m["width"] * METERS_TO_INCHES,
-                "depth": dims_m["depth"] * METERS_TO_INCHES,
-                "height": dims_m["height"] * METERS_TO_INCHES,
-            }
-            text_label = label
-            if count > 1:
-                text_label = f"{label} {idx}"
-            text = f"{text_label}: {dims_in['width']:.0f}\" W x {dims_in['depth']:.0f}\" D x {dims_in['height']:.0f}\" H"
-            bbox = region["pixel_bbox"]
-            anchor = (bbox["x1"], max(20, bbox["y1"] - 10 - 25 * (idx - 1)))
-            cv2.putText(
-                overlay,
-                text,
-                anchor,
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                color,
-                1,
-                cv2.LINE_AA,
+    items: List[Tuple[str, Dict]] = []
+    if selected_region_ids:
+        id_map = {region.get("region_id"): region for region in furniture_regions}
+        for rid in selected_region_ids:
+            region = id_map.get(rid)
+            if not region:
+                continue
+            label = region.get("type", f"Item {rid}")
+            items.append((label.title(), region))
+    else:
+        used_ids: set[int] = set()
+        for label, type_set, count in PRIMARY_DIMENSION_TARGETS:
+            matched_regions = _select_regions_for_role(
+                furniture_regions,
+                label,
+                {t.lower() for t in type_set},
+                count,
+                used_ids,
             )
-            items_drawn += 1
+            for idx, region in enumerate(matched_regions, start=1):
+                text_label = f"{label} {idx}" if count > 1 else label
+                items.append((text_label, region))
 
-    if items_drawn == 0:
+    if not items:
         cv2.imwrite(str(output_path), cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
         log("No primary furniture dimensions drawn; saved staged image instead.")
         return
+
+    for label, region in items:
+        color = next(color_iter, (255, 255, 255))
+        contour = region.get("contour")
+        if contour is not None:
+            if label.lower().startswith("rug"):
+                rect = cv2.minAreaRect(np.array(contour, dtype=np.float32))
+                box = cv2.boxPoints(rect).astype(np.int32)
+                cv2.polylines(overlay, [box], True, color, 2, cv2.LINE_AA)
+            else:
+                pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
+                cv2.polylines(overlay, [pts], True, color, 2, cv2.LINE_AA)
+
+        dims_m = region["dimensions_m"]
+        dims_in = {
+            "width": dims_m["width"] * METERS_TO_INCHES,
+            "depth": dims_m["depth"] * METERS_TO_INCHES,
+            "height": dims_m["height"] * METERS_TO_INCHES,
+        }
+        text = f"{label}: {dims_in['width']:.0f}\" W x {dims_in['depth']:.0f}\" D x {dims_in['height']:.0f}\" H"
+        bbox = region["pixel_bbox"]
+        anchor = (bbox["x1"], max(20, bbox["y1"] - 10))
+        cv2.putText(
+            overlay,
+            text,
+            anchor,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            color,
+            1,
+            cv2.LINE_AA,
+        )
+
     cv2.imwrite(str(output_path), cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
     log(f"Primary furniture dimensions saved to {output_path}")
 
@@ -872,6 +994,12 @@ def run_bfl_pipeline(
         normals=staged_analysis["normals"],
     )
 
+    selected_region_ids = select_regions_via_gemini(
+        image_rgb=staged_analysis["image_rgb"],
+        furniture_regions=furniture_regions,
+        log_fn=log,
+    )
+
     sam_outline_path = output_dir / f"{image_path.stem}_sam_outlines.png"
     save_sam_outline_visualization(
         image_rgb=staged_analysis["image_rgb"],
@@ -884,6 +1012,7 @@ def run_bfl_pipeline(
         image_rgb=staged_analysis["image_rgb"],
         furniture_regions=furniture_regions,
         output_path=primary_dims_path,
+        selected_region_ids=selected_region_ids,
     )
 
     viz_outputs = integrate_3d_visualization(

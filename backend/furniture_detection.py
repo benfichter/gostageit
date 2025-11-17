@@ -113,6 +113,7 @@ class FurnitureDetector:
         regions: List[Dict] = []
         selected_bboxes: List[Dict[str, int]] = []
 
+        region_counter = 1
         for mask_data in masks:
             area = mask_data.get("area", 0)
             if area < min_area or area > max_area:
@@ -140,6 +141,7 @@ class FurnitureDetector:
                 continue
 
             region = {
+                "region_id": region_counter,
                 "pixel_bbox": bbox,
                 "contour": contour.tolist(),
                 "dimensions_m": dims,
@@ -152,6 +154,7 @@ class FurnitureDetector:
             }
             regions.append(region)
             selected_bboxes.append(bbox)
+            region_counter += 1
 
             if len(regions) >= self.max_regions:
                 break

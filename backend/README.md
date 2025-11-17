@@ -152,8 +152,19 @@ If `SAM_CHECKPOINT_PATH` is missing the pipeline aborts before staging, since SA
 Outputs from this step include:
 
 - `*_sam_outlines.png` – SAM mask contours drawn directly on the staged photo (no MoGe dimensions), useful to inspect the raw segmentation before measurement.
-- `*_key_furniture_dimensions.png` – annotations for the key furniture (rug, table, sofas, TV console / shelves) with MoGe W×D×H values rendered along the SAM contours.
+- `*_key_furniture_dimensions.png` – annotations for the key furniture (rug, table, sofas, TV console / shelves) with MoGe W×D×H values rendered along the SAM contours. If you set `GOOGLE_API_KEY`, Gemini chooses the five most important SAM regions; otherwise we fall back to heuristics.
 - `*_subject_mask.png` / `*_subject_overlay.png` / `*_subject.png` – Apple-style cutouts driven by the same SAM run.
+
+Optional Gemini setup for key-item selection:
+
+```bash
+export GOOGLE_API_KEY=sk-your-genai-key
+# Or configure Vertex routing as usual:
+# export GOOGLE_CLOUD_PROJECT=...
+# export GOOGLE_GENAI_USE_VERTEXAI=True
+```
+
+With that in place, the pipeline uploads a numbered SAM overlay and candidate metadata, asks Gemini to choose the five most important furniture items, and only labels those pieces.
 
 ### 3D furniture outlines
 
