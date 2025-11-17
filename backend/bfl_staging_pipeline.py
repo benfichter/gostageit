@@ -44,6 +44,20 @@ def encode_reference_image(image_rgb: np.ndarray) -> str:
     return base64.b64encode(buffer).decode("utf-8")
 
 
+def make_json_serializable(data):
+    if isinstance(data, dict):
+        return {k: make_json_serializable(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [make_json_serializable(v) for v in data]
+    if isinstance(data, tuple):
+        return [make_json_serializable(v) for v in data]
+    if isinstance(data, np.ndarray):
+        return make_json_serializable(data.tolist())
+    if isinstance(data, np.generic):
+        return data.item()
+    return data
+
+
 @dataclass
 class RoomDescription:
     """Lightweight summary of key room appearance cues used for prompting."""
@@ -584,7 +598,7 @@ def save_furniture_metadata(
         "prompt_used": prompt,
     }
     with metadata_path.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2)
+        json.dump(make_json_serializable(payload), f, indent=2)
     log(f"Furniture metadata saved to {metadata_path}")
 
 
