@@ -538,7 +538,7 @@ def save_sam_outline_visualization(
             continue
         color = color_palette[(idx - 1) % len(color_palette)]
         pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
-        cv2.polylines(overlay, [pts], True, color, 3, cv2.LINE_AA)
+        cv2.polylines(overlay, [pts], True, color, 2, cv2.LINE_AA)
         text_origin = tuple(pts[0, 0])
         cv2.putText(
             overlay,

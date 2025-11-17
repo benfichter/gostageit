@@ -64,10 +64,10 @@ class FurnitureDetector:
         self,
         sam_extractor: SamSubjectExtractor,
         log_fn: Callable[[str], None] = default_log,
-        min_area_ratio: float = 0.01,
-        max_area_ratio: float = 0.35,
+        min_area_ratio: float = 0.003,
+        max_area_ratio: float = 0.4,
         min_points: int = 200,
-        max_regions: int = 15,
+        max_regions: int = 30,
         max_iou: float = 0.7,
     ) -> None:
         if sam_extractor is None:
@@ -201,13 +201,20 @@ class FurnitureDetector:
         return {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
 
     @staticmethod
-    def _touches_border(bbox: Dict[str, int], image_w: int, image_h: int, margin: int = 4) -> bool:
-        return (
-            bbox["x1"] <= margin
-            or bbox["y1"] <= margin
-            or bbox["x2"] >= image_w - margin
-            or bbox["y2"] >= image_h - margin
-        )
+    def _touches_border(
+        bbox: Dict[str, int],
+        image_w: int,
+        image_h: int,
+        margin: int = 2,
+        full_ratio: float = 0.6,
+    ) -> bool:
+        width = bbox["x2"] - bbox["x1"]
+        height = bbox["y2"] - bbox["y1"]
+        touches_left = bbox["x1"] <= margin and width > image_w * full_ratio
+        touches_right = bbox["x2"] >= image_w - margin and width > image_w * full_ratio
+        touches_top = bbox["y1"] <= margin and height > image_h * full_ratio
+        touches_bottom = bbox["y2"] >= image_h - margin and height > image_h * full_ratio
+        return touches_left or touches_right or touches_top or touches_bottom
 
 
 def detect_geometric_regions(
