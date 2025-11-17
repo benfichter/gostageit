@@ -129,27 +129,20 @@ Example Kontext request body (the script fills this in automatically using your 
 }
 ```
 
-### Bounding boxes via Gemini (recommended)
+### Furniture bounding boxes via MoGe (default)
 
-MoGe still computes every furniture item's real-world W×D×H, but we now rely on [Gemini's bounding-box detection](https://cloud.google.com/vertex-ai/generative-ai/docs/bounding-box-detection) to provide semantic labels and cleaner rectangular extents. Gemini simply maps the furniture (sofa, lamp, shelf, etc.); MoGe's calibrated point cloud supplies the actual measurements.
+We now keep the entire detection loop on-device: MoGe produces the metric point cloud, and we segment furniture directly from the depth/normal fields. The detector:
 
-1. Install the SDK:
-   ```bash
-   pip install google-genai
-   ```
-2. Provide Google Cloud credentials on the pod (for example copy a service-account JSON key and set `export GOOGLE_APPLICATION_CREDENTIALS=/workspace/sa.json`).
-3. Export the required environment variables before running the pipeline:
-   ```bash
-   export GOOGLE_CLOUD_PROJECT=my-gcp-project
-   export GOOGLE_CLOUD_LOCATION=global          # optional, defaults to global
-   export GOOGLE_GENAI_USE_VERTEXAI=True        # required to route calls through Vertex AI
-   ```
+- Removes floor/ceiling points using surface normals
+- Detects depth discontinuities to separate furniture from walls
+- Runs connected-component analysis on the remaining points
+- Estimates each region's 3D footprint/height to classify it (rug, shelving, sofa, etc.)
 
-During runtime the detector uploads the staged photo via the Gen AI SDK, Gemini returns up to 25 labelled boxes in normalized coordinates, and we compute the actual W×D×H measurements using MoGe's calibrated point cloud. If the environment variables are missing the furniture step is skipped (the rest of the pipeline still runs).
+All bounding boxes, labels, and measurements flow from that single MoGe pass - no external APIs or credentials are required.
 
 ### 3D furniture outlines
 
-After Gemini labels each detection, we project the MoGe-derived 3D bounding boxes back into the staged photo. This produces perspective-correct outlines—even for angled rugs or tall shelves—and the pipeline writes:
+After the MoGe detector segments each furniture cluster, we project the calibrated 3D bounding boxes back into the staged photo. This produces perspective-correct outlines - even for angled rugs or tall shelves - and the pipeline writes:
 
 - `*_3d_boxes.png` – staged image with 3D wireframes
 - `*_3d_data.json` – list of centers/corners/metrics for every furniture box

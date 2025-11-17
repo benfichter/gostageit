@@ -14,11 +14,7 @@ import requests
 import torch
 import dotenv
 from moge.model.v2 import MoGeModel
-from furniture_detection import (
-    FurnitureLabelerUnavailable,
-    detect_geometric_regions,
-    build_gemini_labeler,
-)
+from furniture_detection import detect_geometric_regions
 from furniture_3d_visualization import integrate_3d_visualization
 
 dotenv.load_dotenv()
@@ -544,20 +540,6 @@ def save_surface_visualization(
     log(f"Surface detection visualization saved to {output_path}")
 
 
-_GEMINI_LABELER = None
-
-
-def get_gemini_labeler():
-    global _GEMINI_LABELER
-    if _GEMINI_LABELER is None:
-        try:
-            _GEMINI_LABELER = build_gemini_labeler(log_fn=log)
-        except FurnitureLabelerUnavailable as exc:
-            log(f"Gemini labelling unavailable: {exc}")
-            _GEMINI_LABELER = False
-    return _GEMINI_LABELER
-
-
 def run_bfl_pipeline(
     image_path: Path,
     style_prompt: str,
@@ -646,10 +628,6 @@ def run_bfl_pipeline(
         room_height=staged_analysis["dimensions"]["height"],
         log_fn=log,
     )
-
-    labeler = get_gemini_labeler()
-    if labeler:
-        labeler.label(staged_analysis["image_rgb"], furniture_regions)
 
     viz_outputs = integrate_3d_visualization(
         image_rgb=staged_analysis["image_rgb"],

@@ -215,7 +215,7 @@ class Furniture3DVisualizer:
                     cv2.line(right, pt1, pt2, color, 2, cv2.LINE_AA)
         canvas[:, :w] = left
         canvas[:, w:] = right
-        cv2.putText(canvas, "Gemini 2D boxes", (w // 2 - 100, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 2)
+        cv2.putText(canvas, "MoGe 2D boxes", (w // 2 - 100, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 2)
         cv2.putText(canvas, "MoGe 3D boxes", (w + w // 2 - 100, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 2)
         cv2.imwrite(str(path), cv2.cvtColor(canvas, cv2.COLOR_RGB2BGR))
 
