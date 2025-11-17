@@ -622,16 +622,20 @@ def run_bfl_pipeline(
     if labeler:
         labeler.label(staged_analysis["image_rgb"], furniture_regions)
 
-    viz_path, data_path, _ = integrate_3d_visualization(
+    viz_outputs = integrate_3d_visualization(
         image_rgb=staged_analysis["image_rgb"],
         points_calibrated=staged_analysis["points_calibrated"],
         furniture_regions=furniture_regions,
         output_dir=output_dir,
     )
-    if viz_path:
-        log(f"3D bounding boxes saved to {viz_path}")
-    if data_path:
-        log(f"3D box data saved to {data_path}")
+    if viz_outputs.get("overlay"):
+        log(f"3D bounding boxes saved to {viz_outputs['overlay']}")
+    if viz_outputs.get("spec"):
+        log(f"Spec view saved to {viz_outputs['spec']}")
+    if viz_outputs.get("comparison"):
+        log(f"Comparison view saved to {viz_outputs['comparison']}")
+    if viz_outputs.get("data"):
+        log(f"3D box data saved to {viz_outputs['data']}")
 
     for region in furniture_regions:
         region.pop("mask", None)
