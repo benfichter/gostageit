@@ -131,7 +131,7 @@ Example Kontext request body (the script fills this in automatically using your 
 
 ### Bounding boxes via Gemini (recommended)
 
-Furniture boxes and labels now come from [Gemini's bounding-box detection](https://cloud.google.com/vertex-ai/generative-ai/docs/bounding-box-detection). Instead of hand-crafted heuristics we rely on the Gen AI SDK to return `[y_min, x_min, y_max, x_max]` boxes which we fuse with MoGe's depth to recover metric dimensions.
+MoGe still computes every furniture item's real-world W×D×H, but we now rely on [Gemini's bounding-box detection](https://cloud.google.com/vertex-ai/generative-ai/docs/bounding-box-detection) to provide semantic labels and cleaner rectangular extents. Gemini simply maps the furniture (sofa, lamp, shelf, etc.); MoGe's calibrated point cloud supplies the actual measurements.
 
 1. Install the SDK:
    ```bash
@@ -146,6 +146,18 @@ Furniture boxes and labels now come from [Gemini's bounding-box detection](https
    ```
 
 During runtime the detector uploads the staged photo via the Gen AI SDK, Gemini returns up to 25 labelled boxes in normalized coordinates, and we compute the actual W×D×H measurements using MoGe's calibrated point cloud. If the environment variables are missing the furniture step is skipped (the rest of the pipeline still runs).
+
+### 3D furniture outlines
+
+After Gemini labels each detection, we project the MoGe-derived 3D bounding boxes back into the staged photo. This produces perspective-correct outlines—even for angled rugs or tall shelves—and the pipeline writes:
+
+- `*_3d_boxes.png` – staged image with 3D wireframes
+- `*_3d_data.json` – list of centers/corners/metrics for every furniture box
+
+Optional extras:
+
+- `pip install alphashape` to tighten outlines for irregular objects
+- `pip install open3d` to emit meshes/PLY files (hooks live in `furniture_3d_visualization.py`)
 
 ---
 
@@ -553,6 +565,8 @@ Each run stores every artifact under `exports/<timestamp>_<input_name>/` so expo
 | `floor_plan.png` | Top-down view with grid and measurements |
 | `ceiling_corners.png` | Ceiling with 4 corners marked and labeled |
 | `annotated_dimensions.png` | Original with width/height/depth annotations |
+| `*_3d_boxes.png` | Perspective-correct 3D furniture outlines |
+| `*_3d_data.json` | JSON dump of 3D box centers and corners |
 | `room_dimensions.txt` | Text summary of measurements |
 | `calibrated_points.npy` | Calibrated 3D point cloud (NumPy array) |
 

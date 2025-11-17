@@ -15,10 +15,11 @@ import torch
 import dotenv
 from moge.model.v2 import MoGeModel
 from furniture_detection import (
-    FurnitureDetectionUnavailable,
-    FurnitureDetector,
-    build_detector_from_env,
+    FurnitureLabelerUnavailable,
+    detect_geometric_regions,
+    build_gemini_labeler,
 )
+from furniture_3d_visualization import integrate_3d_visualization
 
 dotenv.load_dotenv()
 
@@ -521,22 +522,18 @@ def save_furniture_metadata(
     log(f"Furniture metadata saved to {metadata_path}")
 
 
-def build_furniture_detector():
-    return build_detector_from_env(log_fn=log)
+_GEMINI_LABELER = None
 
 
-_FURNITURE_DETECTOR = None
-
-
-def get_furniture_detector() -> FurnitureDetector:
-    global _FURNITURE_DETECTOR
-    if _FURNITURE_DETECTOR is None:
+def get_gemini_labeler():
+    global _GEMINI_LABELER
+    if _GEMINI_LABELER is None:
         try:
-            _FURNITURE_DETECTOR = build_furniture_detector()
-        except FurnitureDetectionUnavailable as exc:
-            log(f"Furniture detection unavailable: {exc}")
-            _FURNITURE_DETECTOR = False
-    return _FURNITURE_DETECTOR
+            _GEMINI_LABELER = build_gemini_labeler(log_fn=log)
+        except FurnitureLabelerUnavailable as exc:
+            log(f"Gemini labelling unavailable: {exc}")
+            _GEMINI_LABELER = False
+    return _GEMINI_LABELER
 
 
 def run_bfl_pipeline(
@@ -613,16 +610,31 @@ def run_bfl_pipeline(
         label="staged",
     )
 
-    detector = get_furniture_detector()
-    if detector:
-        furniture_regions = detector.detect(
-            image_rgb=staged_analysis["image_rgb"],
-            points_calibrated=staged_analysis["points_calibrated"],
-            mask=staged_analysis["mask"],
-            room_height=staged_analysis["dimensions"]["height"],
-        )
-    else:
-        furniture_regions = []
+    furniture_regions = detect_geometric_regions(
+        points_calibrated=staged_analysis["points_calibrated"],
+        mask=staged_analysis["mask"],
+        normals=staged_analysis["normals"],
+        room_height=staged_analysis["dimensions"]["height"],
+        log_fn=log,
+    )
+
+    labeler = get_gemini_labeler()
+    if labeler:
+        labeler.label(staged_analysis["image_rgb"], furniture_regions)
+
+    viz_path, data_path, _ = integrate_3d_visualization(
+        image_rgb=staged_analysis["image_rgb"],
+        points_calibrated=staged_analysis["points_calibrated"],
+        furniture_regions=furniture_regions,
+        output_dir=output_dir,
+    )
+    if viz_path:
+        log(f"3D bounding boxes saved to {viz_path}")
+    if data_path:
+        log(f"3D box data saved to {data_path}")
+
+    for region in furniture_regions:
+        region.pop("mask", None)
 
     annotate_furniture_boxes(
         image_rgb=staged_analysis["image_rgb"],
