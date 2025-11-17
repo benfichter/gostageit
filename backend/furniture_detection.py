@@ -100,7 +100,7 @@ class FurnitureDetector:
             self.log("Failed to encode staged image for Gemini request.")
             return []
 
-        part = Part.from_data(data=buffer.tobytes(), mime_type="image/jpeg")
+        part = Part.from_bytes(data=buffer.tobytes(), mime_type="image/jpeg")
         try:
             response = self.client.models.generate_content(
                 model=self.config.model,
