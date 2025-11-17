@@ -14,7 +14,10 @@ import requests
 import torch
 import dotenv
 from moge.model.v2 import MoGeModel
-from furniture_detection import FurnitureDetector, FurnitureDetectorConfig
+from furniture_detection import (
+    FurnitureDetectionUnavailable,
+    build_detector_from_env,
+)
 
 dotenv.load_dotenv()
 
@@ -471,15 +474,22 @@ def annotate_furniture_boxes(
             2,
         )
 
-        label = (
-            f"Item {idx} | {dims['width']:.2f}m W x "
-            f"{dims['depth']:.2f}m D x {dims['height']:.2f}m H"
+        label_parts = []
+        item_name = region.get("type")
+        if item_name:
+            label_parts.append(f"{item_name}")
+        label_parts.append(
+            f"{dims['width']:.2f}m W x {dims['depth']:.2f}m D x {dims['height']:.2f}m H"
         )
+        confidence = region.get("confidence")
+        if confidence is not None:
+            label_parts.append(f"{confidence*100:.0f}%")
+        label_text = " | ".join(label_parts) or f"Item {idx}"
         text_origin = (bbox["x1"] + 4, max(20, bbox["y1"] - 10))
 
         cv2.putText(
             overlay,
-            label,
+            label_text,
             text_origin,
             cv2.FONT_HERSHEY_SIMPLEX,
             0.45,
@@ -510,26 +520,21 @@ def save_furniture_metadata(
     log(f"Furniture metadata saved to {metadata_path}")
 
 
-def build_furniture_detector() -> FurnitureDetector:
-    use_sam = os.environ.get("FURNITURE_USE_SAM", "false").lower() == "true"
-    use_clip = os.environ.get("FURNITURE_USE_CLIP", "false").lower() == "true"
-    sam_ckpt = os.environ.get("FURNITURE_SAM_CKPT")
-    config = FurnitureDetectorConfig(
-        use_sam=use_sam,
-        sam_checkpoint=sam_ckpt,
-        use_clip=use_clip,
-        clip_device="cuda" if torch.cuda.is_available() else "cpu",
-    )
-    return FurnitureDetector(config, log_fn=log)
+def build_furniture_detector():
+    return build_detector_from_env(log_fn=log)
 
 
-_FURNITURE_DETECTOR: Optional[FurnitureDetector] = None
+_FURNITURE_DETECTOR = None
 
 
 def get_furniture_detector() -> FurnitureDetector:
     global _FURNITURE_DETECTOR
     if _FURNITURE_DETECTOR is None:
-        _FURNITURE_DETECTOR = build_furniture_detector()
+        try:
+            _FURNITURE_DETECTOR = build_furniture_detector()
+        except FurnitureDetectionUnavailable as exc:
+            log(f"Furniture detection unavailable: {exc}")
+            _FURNITURE_DETECTOR = False
     return _FURNITURE_DETECTOR
 
 
@@ -608,13 +613,16 @@ def run_bfl_pipeline(
     )
 
     detector = get_furniture_detector()
-    furniture_regions = detector.detect(
-        image_rgb=staged_analysis["image_rgb"],
-        points_calibrated=staged_analysis["points_calibrated"],
-        mask=staged_analysis["mask"],
-        normals=staged_analysis["normals"],
-        room_height=staged_analysis["dimensions"]["height"],
-    )
+    if detector:
+        furniture_regions = detector.detect(
+            image_rgb=staged_analysis["image_rgb"],
+            points_calibrated=staged_analysis["points_calibrated"],
+            mask=staged_analysis["mask"],
+            normals=staged_analysis["normals"],
+            room_height=staged_analysis["dimensions"]["height"],
+        )
+    else:
+        furniture_regions = []
 
     annotate_furniture_boxes(
         image_rgb=staged_analysis["image_rgb"],

@@ -129,21 +129,23 @@ Example Kontext request body (the script fills this in automatically using your 
 }
 ```
 
-### Advanced furniture detection (optional)
+### Bounding boxes via Gemini (recommended)
 
-The pipeline now supports richer furniture detection with MoGe geometry plus optional **SAM** and **CLIP** refinement. Enable them via environment variables:
+Furniture boxes and labels now come from [Gemini's bounding-box detection](https://cloud.google.com/vertex-ai/generative-ai/docs/bounding-box-detection). Instead of hand-crafted heuristics we rely on the Gen AI SDK to return `[y_min, x_min, y_max, x_max]` boxes which we fuse with MoGe's depth to recover metric dimensions.
 
-```
-export FURNITURE_USE_SAM=true
-export FURNITURE_SAM_CKPT=/workspace/checkpoints/sam_vit_h.pth
-export FURNITURE_USE_CLIP=true
-```
+1. Install the SDK:
+   ```bash
+   pip install google-genai
+   ```
+2. Provide Google Cloud credentials on the pod (for example copy a service-account JSON key and set `export GOOGLE_APPLICATION_CREDENTIALS=/workspace/sa.json`).
+3. Export the required environment variables before running the pipeline:
+   ```bash
+   export GOOGLE_CLOUD_PROJECT=my-gcp-project
+   export GOOGLE_CLOUD_LOCATION=global          # optional, defaults to global
+   export GOOGLE_GENAI_USE_VERTEXAI=True        # required to route calls through Vertex AI
+   ```
 
-- `FURNITURE_USE_SAM`: Refines region masks using [Segment Anything](https://github.com/facebookresearch/segment-anything). Requires the `segment-anything` package and a checkpoint file.
-- `FURNITURE_SAM_CKPT`: Path to the SAM checkpoint on disk.
-- `FURNITURE_USE_CLIP`: Classifies each detected item (sofa, chair, table, etc.) using OpenAI CLIP. Requires the `clip` package.
-
-If these packages are not installed or the env vars are unset, the detector falls back to the geometric method automatically.
+During runtime the detector uploads the staged photo via the Gen AI SDK, Gemini returns up to 25 labelled boxes in normalized coordinates, and we compute the actual W×D×H measurements using MoGe's calibrated point cloud. If the environment variables are missing the furniture step is skipped (the rest of the pipeline still runs).
 
 ---
 
