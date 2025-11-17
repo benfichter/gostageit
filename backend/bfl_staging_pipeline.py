@@ -555,47 +555,74 @@ def save_sam_outline_visualization(
     log(f"SAM outline visualization saved to {output_path}")
 
 
-PRIMARY_FURNITURE_TYPES = {"rug", "table", "sofa", "tv", "shelving", "cabinet", "console", "media"}
+PRIMARY_DIMENSION_TARGETS = [
+    ("Rug", {"rug"}, 1),
+    ("Table", {"table"}, 1),
+    ("Sofa", {"sofa"}, 2),
+    ("TV", {"tv"}, 1),
+    ("Cabinet/Shelves", {"cabinet", "shelving", "console"}, 1),
+]
 
 
 def save_primary_dimension_overlay(
     image_rgb: np.ndarray,
     furniture_regions: List[Dict],
     output_path: Path,
-    max_items: int = 5,
 ) -> None:
-    primary_regions = [
-        region for region in furniture_regions if region.get("type") in PRIMARY_FURNITURE_TYPES
-    ]
-    primary_regions.sort(key=lambda r: r["dimensions_m"]["width"] * r["dimensions_m"]["depth"], reverse=True)
-    selected = primary_regions[:max_items]
-
-    if not selected:
-        return
+    def area(region: Dict) -> float:
+        dims = region["dimensions_m"]
+        return dims["width"] * dims["depth"]
 
     overlay = image_rgb.copy()
-    for region in selected:
-        color = (255, 255, 255)
-        contour = region.get("contour")
-        if contour:
-            pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
-            cv2.polylines(overlay, [pts], True, color, 2, cv2.LINE_AA)
-        dims_in = region.get("dimensions_in")
-        if dims_in:
-            text = f"{region['type']}: {dims_in['width']:.0f}\" W x {dims_in['depth']:.0f}\" D x {dims_in['height']:.0f}\" H"
+    colors = [
+        (255, 255, 255),
+        (255, 215, 0),
+        (173, 255, 47),
+        (0, 255, 255),
+        (255, 182, 193),
+    ]
+    color_iter = iter(colors)
+
+    items_drawn = 0
+    for label, type_set, count in PRIMARY_DIMENSION_TARGETS:
+        candidates = [
+            r for r in furniture_regions if r.get("type") in type_set and r.get("dimensions_in")
+        ]
+        if not candidates:
+            continue
+        candidates.sort(key=area, reverse=True)
+        color = next(color_iter, (255, 255, 255))
+        for idx, region in enumerate(candidates[:count], start=1):
+            contour = region.get("contour")
+            if contour is not None:
+                if region.get("type") == "rug":
+                    rect = cv2.minAreaRect(np.array(contour, dtype=np.float32))
+                    box = cv2.boxPoints(rect).astype(np.int32)
+                    cv2.polylines(overlay, [box], True, color, 2, cv2.LINE_AA)
+                else:
+                    pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
+                    cv2.polylines(overlay, [pts], True, color, 2, cv2.LINE_AA)
+            dims_in = region["dimensions_in"]
+            text_label = label
+            if count > 1:
+                text_label = f"{label} {idx}"
+            text = f"{text_label}: {dims_in['width']:.0f}\" W x {dims_in['depth']:.0f}\" D x {dims_in['height']:.0f}\" H"
             bbox = region["pixel_bbox"]
-            anchor = (bbox["x1"], max(20, bbox["y1"] - 10))
+            anchor = (bbox["x1"], max(20, bbox["y1"] - 10 - 20 * (idx - 1)))
             cv2.putText(
                 overlay,
                 text,
                 anchor,
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.45,
+                0.5,
                 color,
                 1,
                 cv2.LINE_AA,
             )
+            items_drawn += 1
 
+    if items_drawn == 0:
+        return
     cv2.imwrite(str(output_path), cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
     log(f"Primary furniture dimensions saved to {output_path}")
 
@@ -799,7 +826,6 @@ def run_bfl_pipeline(
         image_rgb=staged_analysis["image_rgb"],
         furniture_regions=furniture_regions,
         output_path=primary_dims_path,
-        max_items=5,
     )
 
     viz_outputs = integrate_3d_visualization(

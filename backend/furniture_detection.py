@@ -24,6 +24,10 @@ def classify_region(dimensions: Dict[str, float]) -> str:
         return "rug"
     if height > 1.4 and footprint < 2.0:
         return "shelving"
+    if depth < 0.25 and width > 0.9 and height < 1.2:
+        return "tv"
+    if height < 1.2 and width > 0.8 and depth > 0.25:
+        return "cabinet"
     if height > 0.8 and width > 1.2 and depth > 0.4:
         return "sofa"
     if height < 0.6 and footprint < 1.5:

@@ -152,6 +152,7 @@ If `SAM_CHECKPOINT_PATH` is missing the pipeline aborts before staging, since SA
 Outputs from this step include:
 
 - `*_sam_outlines.png` – SAM mask contours drawn directly on the staged photo (no MoGe dimensions), useful to inspect the raw segmentation before measurement.
+- `*_primary_dimensions.png` – annotations for the key furniture (rug, table, sofas, TV console / shelves) with MoGe W×D×H values rendered along the SAM contours.
 - `*_subject_mask.png` / `*_subject_overlay.png` / `*_subject.png` – Apple-style cutouts driven by the same SAM run.
 
 ### 3D furniture outlines
