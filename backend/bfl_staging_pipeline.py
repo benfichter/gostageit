@@ -701,10 +701,8 @@ def select_regions_via_gemini(
 
     prompt = (
         "You are an interior designer. The image shows a staged room with numbered SAM masks. "
-        "Select the five most important furniture pieces (prioritize sofas, rugs, tables, media consoles/TVs, cabinets or shelves). "
+        "Select the five most important furniture pieces to dimension if a prospective buyer wants to know what can generally fit. Prioritize larger items and key pieces like sofas, tables, and rugs."
         "Return JSON like {\"region_ids\": [3,7,11,4,1]}. "
-        "Here are the candidate summaries:\n"
-        + "\n".join(summaries)
     )
 
     try:
