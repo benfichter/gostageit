@@ -1,0 +1,102 @@
+================================================================================
+FURNITURE PLACEMENT SYSTEM - QUICK START GUIDE
+================================================================================
+
+WHAT IT DOES:
+- Takes a photo of an empty room
+- Analyzes 3D geometry using deep learning (MoGe)
+- Automatically places furniture using physics and design rules
+- Creates visualizations of the furnished room
+
+================================================================================
+INSTALLATION (5 minutes)
+================================================================================
+
+1. INSTALL PYTHON PACKAGES:
+   pip install torch torchvision opencv-python numpy trimesh pybullet pillow scipy scikit-learn python-dotenv
+
+2. INSTALL MOGE MODEL:
+   pip install git+https://github.com/Ruicheng/moge.git
+
+3. (OPTIONAL) FOR 3D RENDERING:
+   pip install pyrender pyglet==1.5.27
+
+================================================================================
+RUNNING THE SYSTEM
+================================================================================
+
+BASIC USAGE:
+   python main.py --image your_room.jpg
+
+WITH OPTIONS:
+   python main.py --image room.jpg --ceiling-height 2.7  # Set room height
+   python main.py --image room.jpg --use-3d               # Use 3D rendering
+   python main.py --image room.jpg --device cpu           # Force CPU mode
+
+================================================================================
+OUTPUT FILES
+================================================================================
+
+The system creates an outputs/ folder with:
+- placement_topdown.png    → Bird's eye view floor plan
+- placement_2d.png         → Furniture overlaid on your photo
+- annotated_dimensions.png → With measurements
+- placements.json         → Furniture coordinates (for developers)
+- summary.txt            → Human-readable report
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+ERROR: "CUDA out of memory" or GPU issues
+FIX:   python main.py --image room.jpg --device cpu
+
+ERROR: "No module named 'moge'"
+FIX:   pip install git+https://github.com/Ruicheng/moge.git
+
+ERROR: "No module named 'pyrender'" (only if using --use-3d)
+FIX:   pip install pyrender pyglet==1.5.27
+
+================================================================================
+WHAT FURNITURE GETS PLACED?
+================================================================================
+
+LIVING ROOM (>15m²):
+- Sofa
+- Coffee table  
+- TV console
+- Area rug
+- Armchairs (if space allows)
+
+BEDROOM (<15m²):
+- Bed
+- Nightstands
+- Dresser
+
+The system automatically:
+- Scales furniture to room size
+- Places sofas against walls
+- Keeps walkways clear (60-90cm)
+- Centers rugs under seating
+
+================================================================================
+TEST YOUR INSTALLATION
+================================================================================
+
+Run: python test_installation.py
+
+This will:
+- Check all dependencies
+- Test GPU availability
+- Create a sample room image
+- Verify everything works
+
+================================================================================
+NEED HELP?
+================================================================================
+
+1. Check README.md for detailed documentation
+2. Run test_installation.py to diagnose issues
+3. Most common fix: pip install -r requirements.txt
+
+================================================================================

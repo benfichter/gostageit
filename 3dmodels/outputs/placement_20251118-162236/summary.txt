@@ -1,0 +1,43 @@
+============================================================
+FURNITURE PLACEMENT SUMMARY
+============================================================
+
+ROOM ANALYSIS:
+------------------------------
+Type: Living Room
+Dimensions: 5.92m × 5.08m
+Height: 2.71m
+Floor Area: 30.05m²
+Volume: 81.44m³
+Calibration Factor: 1.0004
+
+FURNITURE PLACEMENT:
+------------------------------
+Total Items Placed: 3
+
+1. Coffee Table
+   Dimensions: 1.38m W × 0.69m D × 0.48m H
+   (4.5' × 2.3' × 1.6')
+   Position: X=-0.42m, Y=1.47m, Z=3.48m
+   Rotation: 0.0°
+   Placement Score: 143.06
+
+2. Rug
+   Dimensions: 2.76m W × 1.95m D × 0.02m H
+   (9.1' × 6.4' × 0.1')
+   Position: X=-0.27m, Y=1.24m, Z=4.49m
+   Rotation: 0.0°
+   Placement Score: 57.89
+
+3. Side Table
+   Dimensions: 0.57m W × 0.57m D × 0.69m H
+   (1.9' × 1.9' × 2.3')
+   Position: X=2.23m, Y=1.57m, Z=6.69m
+   Rotation: 0.0°
+   Placement Score: 111.83
+
+STATISTICS:
+------------------------------
+Floor Coverage: 22.2%
+Free Floor Space: 23.37m²
+Average Placement Score: 104.26
