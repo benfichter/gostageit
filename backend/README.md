@@ -167,6 +167,7 @@ export GOOGLE_API_KEY=sk-your-genai-key
 ```
 
 With that in place, the pipeline uploads a numbered SAM overlay and candidate metadata, asks Gemini to choose the five most important furniture items, and only labels those pieces.
+The JSON response should look like `{"selected_items": [{"region_id": 4, "label": "main sofa"}, ...]}`; those labels show up verbatim on `_key_furniture_dimensions.png`.
 
 ### 3D furniture outlines
 

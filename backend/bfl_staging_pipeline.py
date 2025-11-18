@@ -578,6 +578,7 @@ def render_numbered_sam_overlay(
         if not contour:
             continue
         pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
+        pts = cv2.convexHull(pts)
         color = colors[idx % len(colors)]
         cv2.polylines(overlay, [pts], True, color, 2, cv2.LINE_AA)
         centroid = np.mean(np.array(contour), axis=0).astype(int)
@@ -711,8 +712,10 @@ def select_regions_via_gemini(
 
     prompt = (
         "You are an interior designer. The image shows a staged room with numbered SAM masks. "
-        "Select the five most important furniture pieces to dimension if a prospective buyer wants to know what can generally fit. Prioritize larger items and key pieces like sofas, tables, and rugs."
-        "Return JSON like {\"region_ids\": [3,7,11,4,1]}. "
+        "Select the five most important furniture pieces (sofas, area rug, coffee table, TV/media console, built-in shelves/cabinets if present). "
+        "If a rug is partially visible, still include it. Never select walls, windows, doors, or lamps. "
+        "Return JSON like {\"selected_items\": [{\"region_id\": 3, \"label\": \"left sofa\"}, ...]}. "
+        "Candidate summaries:\n" + "\n".join(summaries)
     )
 
     try:
@@ -733,11 +736,32 @@ def select_regions_via_gemini(
                 selection = json.loads(text[start : end + 1])
             else:
                 raise
+        selected_items = selection.get("selected_items")
+        if isinstance(selected_items, list):
+            normalized = []
+            for item in selected_items:
+                try:
+                    region_id = int(item.get("region_id"))
+                except (TypeError, ValueError):
+                    continue
+                normalized.append(
+                    {
+                        "region_id": region_id,
+                        "label": str(item.get("label") or f"Item {region_id}"),
+                    }
+                )
+            log_fn(f"Gemini selected items: {normalized}")
+            return normalized
         region_ids = selection.get("region_ids")
-        if not isinstance(region_ids, list):
-            raise ValueError("Gemini response missing region_ids list")
-        log_fn(f"Gemini selected region IDs: {region_ids}")
-        return [int(rid) for rid in region_ids if isinstance(rid, (int, float))]
+        if isinstance(region_ids, list):
+            normalized = [
+                {"region_id": int(rid), "label": f"Item {int(rid)}"}
+                for rid in region_ids
+                if isinstance(rid, (int, float))
+            ]
+            log_fn(f"Gemini selected region IDs: {region_ids}")
+            return normalized
+        raise ValueError("Gemini response missing selected_items or region_ids list")
     except Exception as exc:
         log_fn(f"Gemini selection failed: {exc}")
         return None
@@ -747,7 +771,7 @@ def save_primary_dimension_overlay(
     image_rgb: np.ndarray,
     furniture_regions: List[Dict],
     output_path: Path,
-    selected_region_ids: Optional[List[int]] = None,
+    selected_items: Optional[List[Dict]] = None,
 ) -> None:
     overlay = image_rgb.copy()
     colors = [
@@ -760,13 +784,14 @@ def save_primary_dimension_overlay(
     color_iter = iter(colors)
 
     items: List[Tuple[str, Dict]] = []
-    if selected_region_ids:
+    if selected_items:
         id_map = {region.get("region_id"): region for region in furniture_regions}
-        for rid in selected_region_ids:
+        for item in selected_items:
+            rid = item.get("region_id")
             region = id_map.get(rid)
             if not region:
                 continue
-            label = region.get("type", f"Item {rid}")
+            label = item.get("label") or region.get("type", f"Item {rid}")
             items.append((label.title(), region))
     else:
         used_ids: set[int] = set()
@@ -1013,7 +1038,7 @@ def run_bfl_pipeline(
         normals=staged_analysis["normals"],
     )
 
-    selected_region_ids = select_regions_via_gemini(
+    selected_items = select_regions_via_gemini(
         image_rgb=staged_analysis["image_rgb"],
         furniture_regions=furniture_regions,
         log_fn=log,
@@ -1031,7 +1056,7 @@ def run_bfl_pipeline(
         image_rgb=staged_analysis["image_rgb"],
         furniture_regions=furniture_regions,
         output_path=primary_dims_path,
-        selected_region_ids=selected_region_ids,
+        selected_items=selected_items,
     )
 
     viz_outputs = integrate_3d_visualization(
