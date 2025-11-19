@@ -1,0 +1,35 @@
+[
+  {
+    "type": "coffee_table",
+    "dimensions": {
+      "width": 1.38,
+      "depth": 0.69,
+      "height": 0.48299999999999993
+    },
+    "position": "[-0.41822354  1.46910737  3.47749636]",
+    "rotation": 0,
+    "score": 143.05763224866166
+  },
+  {
+    "type": "rug",
+    "dimensions": {
+      "width": 2.76,
+      "depth": 1.9549999999999998,
+      "height": 0.023
+    },
+    "position": "[-0.2694701   1.23760737  4.49295795]",
+    "rotation": 0,
+    "score": 57.890634741268876
+  },
+  {
+    "type": "side_table",
+    "dimensions": {
+      "width": 0.575,
+      "depth": 0.575,
+      "height": 0.69
+    },
+    "position": "[2.2336463  1.57260737 6.69411192]",
+    "rotation": 0,
+    "score": 111.83449310894909
+  }
+]
