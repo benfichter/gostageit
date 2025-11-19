@@ -22,7 +22,7 @@ except ImportError:
         from moge.model.v1 import MoGeModel
         print("Warning: Using MoGe v1, consider upgrading to v2")
     except ImportError:
-        print("ERROR: MoGe not found. Install with: pip install git+https://github.com/Ruicheng/moge.git")
+        print("ERROR: MoGe not found. Install with: pip install git+https://github.com/microsoft/MoGe.git")
         MoGeModel = None
 
 # Import our placement modules
@@ -72,7 +72,7 @@ def run_placement_pipeline(
     
     # Check if MoGe is available
     if MoGeModel is None:
-        raise ImportError("MoGe model not available. Please install with: pip install git+https://github.com/Ruicheng/moge.git")
+        raise ImportError("MoGe model not available. Please install with: pip install git+https://github.com/microsoft/MoGe.git")
     
     # Setup device
     if device is None:
@@ -88,16 +88,28 @@ def run_placement_pipeline(
     # Load MoGe model if not provided
     if model is None:
         log(f"Loading MoGe model on {device}...")
-        try:
-            model = MoGeModel.from_pretrained("Ruicheng/moge-2-vitl-normal").to(device)
-        except:
-            log("Failed to load MoGe-2, trying alternative...")
+        checkpoint_candidates = [
+            "microsoft/moge-2-vitl-normal",
+            "Ruicheng/moge-2-vitl-normal",
+            "microsoft/moge-vitl",
+            "Ruicheng/moge-vitl",
+        ]
+        last_error = None
+        for checkpoint in checkpoint_candidates:
             try:
-                model = MoGeModel.from_pretrained("Ruicheng/moge-vitl").to(device)
-            except:
-                raise RuntimeError("Could not load MoGe model. Check your internet connection.")
+                log(f"  Trying checkpoint: {checkpoint}")
+                model = MoGeModel.from_pretrained(checkpoint).to(device)
+                log(f"MoGe weights loaded from {checkpoint}")
+                break
+            except Exception as exc:
+                last_error = exc
+                log(f"  Failed to load {checkpoint}: {exc}")
+        else:
+            raise RuntimeError(
+                "Could not load any MoGe model checkpoint. "
+                "Verify internet access or specify a local checkpoint."
+            ) from last_error
         model.eval()
-        log("MoGe model loaded")
     
     # Step 1: Analyze room
     log("Analyzing room geometry with MoGe...")

@@ -57,7 +57,7 @@ def test_imports():
             from moge.model.v1 import MoGeModel
             print("✓ MoGe v1: OK (consider upgrading to v2)")
         except ImportError:
-            print("✗ MoGe: MISSING - Install with: pip install git+https://github.com/Ruicheng/moge.git")
+            print("✗ MoGe: MISSING - Install with: pip install git+https://github.com/microsoft/MoGe.git")
             all_good = False
     
     print("\nTesting local modules...")
@@ -166,7 +166,7 @@ def main():
         print("✗ Some dependencies missing")
         print("\nPlease run:")
         print("  pip install -r requirements.txt")
-        print("  pip install git+https://github.com/Ruicheng/moge.git")
+        print("  pip install git+https://github.com/microsoft/MoGe.git")
     
     print("\n")
 

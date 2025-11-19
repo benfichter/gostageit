@@ -77,8 +77,28 @@ def run_placement_pipeline(
     
     # Load MoGe model if not provided
     if model is None:
-        log(f"Loading MoGe-2 model on {device}...")
-        model = MoGeModel.from_pretrained("Ruicheng/moge-2-vitl-normal").to(device)
+        log(f"Loading MoGe model on {device}...")
+        checkpoint_candidates = [
+            "microsoft/moge-2-vitl-normal",
+            "Ruicheng/moge-2-vitl-normal",
+            "microsoft/moge-vitl",
+            "Ruicheng/moge-vitl",
+        ]
+        last_error = None
+        for checkpoint in checkpoint_candidates:
+            try:
+                log(f"  Trying checkpoint: {checkpoint}")
+                model = MoGeModel.from_pretrained(checkpoint).to(device)
+                log(f"MoGe weights loaded from {checkpoint}")
+                break
+            except Exception as exc:
+                last_error = exc
+                log(f"  Failed to load {checkpoint}: {exc}")
+        else:
+            raise RuntimeError(
+                "Could not load any MoGe model checkpoint. "
+                "Verify internet access or specify a local checkpoint."
+            ) from last_error
         model.eval()
         log("MoGe model loaded")
     

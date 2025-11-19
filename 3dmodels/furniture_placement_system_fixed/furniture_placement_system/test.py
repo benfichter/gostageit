@@ -84,7 +84,7 @@ def main():
         print("✓ MoGe model available")
     except ImportError:
         print("✗ MoGe not found")
-        print("  Install with: pip install git+https://github.com/Ruicheng/moge.git")
+        print("  Install with: pip install git+https://github.com/microsoft/MoGe.git")
         sys.exit(1)
     
     # Create test image
