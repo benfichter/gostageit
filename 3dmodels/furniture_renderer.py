@@ -3,6 +3,7 @@ Furniture Rendering Module - Places 3D models into room images
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -10,6 +11,9 @@ import cv2
 import numpy as np
 import trimesh
 from PIL import Image
+# Force EGL backend for headless rendering environments (e.g., Runpod)
+os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
+os.environ.setdefault("EGL_PLATFORM", "surfaceless")
 import pyrender
 
 
