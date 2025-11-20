@@ -98,7 +98,8 @@ class Furniture3DVisualizer:
             dims_in = {k: v * self.meters_to_inches for k, v in dims.items()}
             boxes.append(
                 FurnitureBox(
-                    label=region.get("type", "furniture"),
+                    label=region.get("selected_label")
+                    or region.get("type", "furniture"),
                     pixel_bbox=region["pixel_bbox"],
                     corners_3d=corners_3d,
                     corners_2d=corners_2d,

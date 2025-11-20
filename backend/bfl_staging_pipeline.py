@@ -550,10 +550,10 @@ def save_detection_overlay(
             )
             anchor = (bbox["x1"], max(20, bbox["y1"] - 10))
 
-        label = str(region.get("region_id", idx))
+        label = region.get("selected_label") or f"Region {region.get('region_id', idx)}"
         cv2.putText(
             overlay,
-            f"Region {label}",
+            label,
             anchor,
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
@@ -689,6 +689,35 @@ def _select_regions_for_role(
     return selected
 
 
+def build_primary_item_list(
+    furniture_regions: List[Dict], selected_items: Optional[List[Dict]]
+) -> List[Tuple[str, Dict]]:
+    items: List[Tuple[str, Dict]] = []
+    if selected_items:
+        id_map = {region.get("region_id"): region for region in furniture_regions}
+        for item in selected_items:
+            rid = item.get("region_id")
+            region = id_map.get(rid)
+            if not region:
+                continue
+            label = item.get("label") or region.get("type", f"Item {rid}")
+            items.append((label.title(), region))
+    else:
+        used_ids: set[int] = set()
+        for label, type_set, count in PRIMARY_DIMENSION_TARGETS:
+            matched_regions = _select_regions_for_role(
+                furniture_regions,
+                label,
+                {t.lower() for t in type_set},
+                count,
+                used_ids,
+            )
+            for idx, region in enumerate(matched_regions, start=1):
+                text_label = f"{label} {idx}" if count > 1 else label
+                items.append((text_label, region))
+    return items
+
+
 def select_regions_via_gemini(
     image_rgb: np.ndarray,
     furniture_regions: List[Dict],
@@ -789,6 +818,7 @@ def save_primary_dimension_overlay(
     furniture_regions: List[Dict],
     output_path: Path,
     selected_items: Optional[List[Dict]] = None,
+    primary_items: Optional[List[Tuple[str, Dict]]] = None,
 ) -> None:
     overlay = image_rgb.copy()
     colors = [
@@ -800,29 +830,7 @@ def save_primary_dimension_overlay(
     ]
     color_iter = iter(colors)
 
-    items: List[Tuple[str, Dict]] = []
-    if selected_items:
-        id_map = {region.get("region_id"): region for region in furniture_regions}
-        for item in selected_items:
-            rid = item.get("region_id")
-            region = id_map.get(rid)
-            if not region:
-                continue
-            label = item.get("label") or region.get("type", f"Item {rid}")
-            items.append((label.title(), region))
-    else:
-        used_ids: set[int] = set()
-        for label, type_set, count in PRIMARY_DIMENSION_TARGETS:
-            matched_regions = _select_regions_for_role(
-                furniture_regions,
-                label,
-                {t.lower() for t in type_set},
-                count,
-                used_ids,
-            )
-            for idx, region in enumerate(matched_regions, start=1):
-                text_label = f"{label} {idx}" if count > 1 else label
-                items.append((text_label, region))
+    items = primary_items or build_primary_item_list(furniture_regions, selected_items)
 
     if not items:
         cv2.imwrite(str(output_path), cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
@@ -1004,11 +1012,18 @@ def run_bfl_pipeline(
         furniture_regions=furniture_regions,
         log_fn=log,
     )
+    primary_items = build_primary_item_list(furniture_regions, selected_items)
+    highlighted_regions: List[Dict] = []
+    for label, region in primary_items:
+        region["selected_label"] = label
+        highlighted_regions.append(region)
+    if not highlighted_regions:
+        highlighted_regions = furniture_regions
 
     detection_overlay_path = output_dir / f"{image_path.stem}_detections.png"
     save_detection_overlay(
         image_rgb=staged_analysis["image_rgb"],
-        furniture_regions=furniture_regions,
+        furniture_regions=highlighted_regions,
         output_path=detection_overlay_path,
     )
 
@@ -1018,12 +1033,13 @@ def run_bfl_pipeline(
         furniture_regions=furniture_regions,
         output_path=primary_dims_path,
         selected_items=selected_items,
+        primary_items=primary_items,
     )
 
     viz_outputs = integrate_3d_visualization(
         image_rgb=staged_analysis["image_rgb"],
         points_calibrated=staged_analysis["points_calibrated"],
-        furniture_regions=furniture_regions,
+        furniture_regions=highlighted_regions,
         output_dir=output_dir,
     )
     if viz_outputs.get("overlay"):
@@ -1040,12 +1056,12 @@ def run_bfl_pipeline(
 
     annotate_furniture_boxes(
         image_rgb=staged_analysis["image_rgb"],
-        furniture_regions=furniture_regions,
+        furniture_regions=highlighted_regions,
         output_path=annotated_path,
     )
     save_furniture_metadata(
         metadata_path=metadata_path,
-        furniture_regions=furniture_regions,
+        furniture_regions=highlighted_regions,
         staged_image_path=staged_path,
         room_dimensions=staged_analysis["dimensions"],
         prompt=prompt,
