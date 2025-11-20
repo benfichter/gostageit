@@ -147,7 +147,11 @@ class FurnitureDetector:
             if object_mask.sum() < self.min_points:
                 continue
 
-            dims_center = self._compute_dimensions(points_calibrated, object_mask)
+            object_points = points_calibrated[object_mask]
+            if len(object_points) < self.min_points:
+                continue
+
+            dims_center = self._compute_dimensions(object_points=object_points)
             if dims_center is None:
                 continue
 
@@ -170,6 +174,7 @@ class FurnitureDetector:
                     "dimensions_m": dims,
                     "center": dims_center["center"],
                     "point_count": int(object_mask.sum()),
+                    "points_3d": object_points.astype(np.float32, copy=False),
                     "confidence": mask_data.get("predicted_iou"),
                     "type": classify_region(dims),
                 }
@@ -200,10 +205,14 @@ class FurnitureDetector:
 
     @staticmethod
     def _compute_dimensions(
-        points_calibrated: np.ndarray,
-        mask: np.ndarray,
+        points_calibrated: Optional[np.ndarray] = None,
+        mask: Optional[np.ndarray] = None,
+        object_points: Optional[np.ndarray] = None,
     ) -> Optional[Dict[str, Dict[str, float]]]:
-        object_points = points_calibrated[mask]
+        if object_points is None:
+            if points_calibrated is None or mask is None:
+                return None
+            object_points = points_calibrated[mask]
         if len(object_points) < 20:
             return None
 
@@ -397,6 +406,7 @@ def detect_geometric_regions(
                 "mask": component_mask,
                 "contour": contour_points,
                 "confidence": None,
+                "points_3d": object_points.astype(np.float32, copy=False),
                 "type": classify_region(dims),
             }
         )

@@ -178,19 +178,23 @@ class Furniture3DVisualizer:
         boxes: List[FurnitureBox] = []
         height_img, width_img = image_rgb.shape[:2]
         for region in furniture_regions:
-            mask = region.get("mask")
-            if mask is None:
+            pts = region.get("points_3d")
+            if pts is None or len(pts) < 10:
+                mask = region.get("mask")
+                if mask is None:
+                    continue
+                pts = points_calibrated[mask]
+            if pts is None or len(pts) < 10:
                 continue
-            pts = points_calibrated[mask]
             footprint_override = None
             contour = region.get("contour")
             if contour:
-                override_pts = []
+                override_pts: List[List[float]] = []
                 for (px, py) in contour:
                     if 0 <= py < height_img and 0 <= px < width_img:
                         pt = points_calibrated[int(py), int(px)]
                         if np.all(np.isfinite(pt)):
-                            override_pts.append([pt[0], pt[2]])
+                            override_pts.append([float(pt[0]), float(pt[2])])
                 if len(override_pts) >= 3:
                     footprint_override = np.array(override_pts, dtype=np.float32)
             result = self._build_box(
