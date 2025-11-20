@@ -15,6 +15,10 @@ import torch
 import dotenv
 from moge.model.v2 import MoGeModel
 from furniture_detection import FurnitureDetector
+from sam_subject_extractor import (
+    SamSubjectExtractor,
+    SubjectExtractorUnavailable,
+)
 from furniture_3d_visualization import integrate_3d_visualization
 
 try:
@@ -916,6 +920,41 @@ def save_surface_visualization(
     log(f"Surface detection visualization saved to {output_path}")
 
 
+_SAM_EXTRACTOR: Optional[SamSubjectExtractor] = None
+_SAM_UNAVAILABLE = False
+
+
+def get_sam_extractor(
+    device: Optional[torch.device] = None,
+) -> Optional[SamSubjectExtractor]:
+    global _SAM_EXTRACTOR, _SAM_UNAVAILABLE
+    if _SAM_UNAVAILABLE:
+        return None
+    if _SAM_EXTRACTOR is None:
+        checkpoint = os.getenv("SAM_CHECKPOINT_PATH")
+        if not checkpoint:
+            log("SAM furniture segmentation disabled: SAM_CHECKPOINT_PATH not set.")
+            _SAM_UNAVAILABLE = True
+            return None
+        model_type = os.getenv("SAM_MODEL_TYPE", "vit_h")
+        target_device = device or torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
+        try:
+            _SAM_EXTRACTOR = SamSubjectExtractor(
+                checkpoint_path=Path(checkpoint),
+                model_type=model_type,
+                device=target_device,
+                log_fn=log,
+            )
+            log(f"SAM furniture segmentation enabled ({model_type})")
+        except SubjectExtractorUnavailable as exc:
+            log(f"SAM extractor unavailable: {exc}")
+            _SAM_UNAVAILABLE = True
+            _SAM_EXTRACTOR = None
+    return _SAM_EXTRACTOR
+
+
 def run_bfl_pipeline(
     image_path: Path,
     style_prompt: str,
@@ -950,7 +989,10 @@ def run_bfl_pipeline(
     overall_start = time.perf_counter()
     log("Starting BFL staging pipeline")
     log(f"Input image: {image_path}")
-    furniture_detector = FurnitureDetector(log_fn=log)
+    sam_extractor = get_sam_extractor(device=resolved_device)
+    if sam_extractor is None:
+        log("SAM not available; falling back to geometry-only furniture detection.")
+    furniture_detector = FurnitureDetector(log_fn=log, sam_extractor=sam_extractor)
 
     original_analysis = run_moge_analysis(
         model=model,

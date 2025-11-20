@@ -129,19 +129,30 @@ Example Kontext request body (the script fills this in automatically using your 
 }
 ```
 
-### Furniture bounding boxes via MoGe (default)
+### Furniture bounding boxes via MoGe + SAM
 
-Furniture segmentation is now purely geometry-driven—no SAM checkpoints or extra downloads required. The detector:
+For realtor-ready overlays we now rely on **Segment Anything (SAM)** to isolate each key furniture piece, then measure it with MoGe’s metric point cloud:
 
-1. Uses MoGe normals to carve out the floor, ceiling, and planar walls.
-2. Clusters the remaining calibrated points (plus depth discontinuities) into connected components.
-3. Filters clusters by physical size and point-count to reject artifacts.
-4. Measures width × depth × height directly from the calibrated points and fits PCA-aligned cuboids for visualization.
+1. SAM generates dozens of candidate masks on the staged render.
+2. We filter and keep the most furniture-like masks (rug, sofas, tables, cabinets, etc.).
+3. MoGe points inside each mask yield calibrated width × depth × height plus 3D cuboids.
+4. Only the selected items (via Gemini or heuristics) are rendered in the detection/dimension overlays.
 
-Outputs from this step include:
+To enable SAM (recommended):
 
-- `*_detections.png` – depth-based overlay that numbers every detected furniture blob.
-- `*_key_furniture_dimensions.png` – annotations for the key furniture (rug, table, sofas, TV console / shelves) with MoGe W×D×H values rendered next to the detections. If you set `GOOGLE_API_KEY`, Gemini chooses the five most important regions; otherwise we fall back to heuristics.
+```bash
+pip install -r backend/requirements.txt
+export SAM_CHECKPOINT_PATH=/workspace/sam_vit_h_4b8939.pth   # download from SAM release notes
+# Optional override: vit_h (default), vit_l, or vit_b
+export SAM_MODEL_TYPE=vit_h
+```
+
+If `SAM_CHECKPOINT_PATH` is not set, the pipeline falls back to the MoGe geometry-only detector (less precise, but still functional).
+
+Outputs from this stage include:
+
+- `*_detections.png` – tight SAM mask overlay for the highlighted furniture items.
+- `*_key_furniture_dimensions.png` – annotations for the key furniture (rug, table, sofas, TV console / shelves) with MoGe W×D×H values rendered next to each contour. If you set `GOOGLE_API_KEY`, Gemini chooses the five most important regions; otherwise we fall back to heuristics.
 
 Optional Gemini setup for key-item selection:
 
@@ -159,7 +170,7 @@ The JSON response should look like `{"selected_items": [{"region_id": 4, "label"
 
 ### 3D furniture outlines
 
-After MoGe segments each furniture cluster, we project the calibrated 3D bounding boxes back into the staged photo. This produces perspective-correct outlines - even for angled rugs or tall shelves - and the pipeline writes:
+After SAM isolates each furniture cluster (or the MoGe fallback kicks in), we project the calibrated 3D bounding boxes back into the staged photo. This produces perspective-correct outlines - even for angled rugs or tall shelves - and the pipeline writes:
 
 - `*_3d_boxes.png` – staged image with 3D wireframes
 - `*_3d_data.json` – list of centers/corners/metrics for every furniture box
