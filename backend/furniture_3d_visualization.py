@@ -58,44 +58,115 @@ class Furniture3DVisualizer:
         floor_y: Optional[float] = None,
         footprint_override: Optional[np.ndarray] = None,
     ) -> Optional[Tuple[np.ndarray, Dict[str, float]]]:
-        if len(points) < 10:
+        """
+        Build a full 3D bounding box using PCA on the horizontal footprint (X–Z),
+        while keeping the vertical axis aligned with the global Y axis.
+
+        points: calibrated MoGe points in camera coords (x right, y down, z forward)
+        """
+        # Basic sanity checks
+        if points is None or len(points) < 10:
             return None
-        pts = points.copy()
-        base_floor = float(
-            floor_y if floor_y is not None else np.percentile(pts[:, 1], 95)
-        )
-        y10 = np.percentile(pts[:, 1], 10)
-        y90 = np.percentile(pts[:, 1], 90)
-        base_y = min(y90, base_floor)
-        top_y = min(base_y + room_height, max(y10, y90))
-        height = float(max(top_y - base_y, 1e-3))
+
+        # Remove NaNs/Infs just in case
+        pts = points[np.isfinite(points).all(axis=1)]
+        if len(pts) < 10:
+            return None
+
+        # ---------------------------------------------------------
+        # 1. Vertical extent (keep Y as global up/down axis)
+        #    MoGe-2 points: y is DOWN, so larger y = closer to floor,
+        #    smaller y = closer to ceiling.
+        # ---------------------------------------------------------
+        y_vals = pts[:, 1]
+        y_min = float(np.percentile(y_vals, 5))   # near ceiling
+        y_max = float(np.percentile(y_vals, 95))  # near floor
+
+        # Optionally clamp to plausible room height if things get crazy
+        raw_height = y_max - y_min
+        if room_height > 0 and raw_height > 1.5 * room_height:
+            center_y = 0.5 * (y_min + y_max)
+            half_h = 0.5 * room_height
+            y_min = center_y - half_h
+            y_max = center_y + half_h
+
+        base_y = y_max   # bottom (near floor)
+        top_y = y_min    # top (near ceiling)
+        height = float(max(base_y - top_y, 1e-3))  # ensure positive
+
+        # ---------------------------------------------------------
+        # 2. Horizontal footprint (X–Z plane) + PCA
+        # ---------------------------------------------------------
         if footprint_override is not None and len(footprint_override) >= 3:
-            footprint = footprint_override.astype(np.float32)
+            footprint = np.asarray(footprint_override, dtype=np.float32)
         else:
+            # Use all points projected into X–Z
             footprint = pts[:, [0, 2]].astype(np.float32)
+
         if len(footprint) < 3:
             return None
-        hull = cv2.convexHull(footprint.reshape(-1, 1, 2))
-        rect = cv2.minAreaRect(hull)
-        box2d = cv2.boxPoints(rect)
-        width = float(max(rect[1][0], 1e-3))
-        depth = float(max(rect[1][1], 1e-3))
-        if width <= 0 or depth <= 0:
+
+        # Center the footprint
+        centroid = footprint.mean(axis=0, keepdims=True)  # shape (1, 2)
+        footprint_centered = footprint - centroid
+
+        # PCA to get major/minor directions in the floor plane
+        pca = PCA(n_components=2)
+        pca.fit(footprint_centered)
+        basis = pca.components_  # shape (2, 2), orthonormal
+
+        # Coordinates of points in PCA basis
+        coords = footprint_centered @ basis.T  # (N, 2)
+
+        min_vals = coords.min(axis=0)
+        max_vals = coords.max(axis=0)
+
+        # Guard against degenerate boxes
+        if (max_vals - min_vals < 1e-3).any():
             return None
-        corners = np.array(
-            [
-                [box2d[0][0], base_y, box2d[0][1]],
-                [box2d[1][0], base_y, box2d[1][1]],
-                [box2d[2][0], base_y, box2d[2][1]],
-                [box2d[3][0], base_y, box2d[3][1]],
-                [box2d[0][0], top_y, box2d[0][1]],
-                [box2d[1][0], top_y, box2d[1][1]],
-                [box2d[2][0], top_y, box2d[2][1]],
-                [box2d[3][0], top_y, box2d[3][1]],
-            ]
-        )
-        dims = {"width": width, "height": height, "depth": depth}
-        return corners, dims
+
+        # Corners in PCA (u, v) space: axis 0 = width, axis 1 = depth
+        c0 = [min_vals[0], min_vals[1]]
+        c1 = [max_vals[0], min_vals[1]]
+        c2 = [max_vals[0], max_vals[1]]
+        c3 = [min_vals[0], max_vals[1]]
+        corners_local = np.array([c0, c1, c2, c3], dtype=np.float32)
+
+        # Map back to world X–Z plane
+        # (u, v) -> (x, z) = (u, v) * basis + centroid
+        corners_xz = corners_local @ basis + centroid  # (4, 2)
+
+        # ---------------------------------------------------------
+        # 3. Assemble full 3D box corners (8 corners)
+        #    Bottom: y = base_y, Top: y = top_y (same X–Z)
+        # ---------------------------------------------------------
+        corners_3d = np.zeros((8, 3), dtype=np.float32)
+
+        # Bottom rectangle (0–3)
+        corners_3d[0] = [corners_xz[0, 0], base_y, corners_xz[0, 1]]
+        corners_3d[1] = [corners_xz[1, 0], base_y, corners_xz[1, 1]]
+        corners_3d[2] = [corners_xz[2, 0], base_y, corners_xz[2, 1]]
+        corners_3d[3] = [corners_xz[3, 0], base_y, corners_xz[3, 1]]
+
+        # Top rectangle (4–7)
+        corners_3d[4] = [corners_xz[0, 0], top_y, corners_xz[0, 1]]
+        corners_3d[5] = [corners_xz[1, 0], top_y, corners_xz[1, 1]]
+        corners_3d[6] = [corners_xz[2, 0], top_y, corners_xz[2, 1]]
+        corners_3d[7] = [corners_xz[3, 0], top_y, corners_xz[3, 1]]
+
+        # ---------------------------------------------------------
+        # 4. Dimensions in meters, aligned with PCA axes
+        # ---------------------------------------------------------
+        width = float(max_vals[0] - min_vals[0])   # along first PCA axis
+        depth = float(max_vals[1] - min_vals[1])   # along second PCA axis
+
+        dims = {
+            "width": width,
+            "depth": depth,
+            "height": height,
+        }
+
+        return corners_3d, dims
 
     def build_boxes(
         self,
