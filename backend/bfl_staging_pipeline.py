@@ -1083,6 +1083,7 @@ def run_bfl_pipeline(
         points_calibrated=staged_analysis["points_calibrated"],
         furniture_regions=highlighted_regions,
         output_dir=output_dir,
+        room_height=staged_analysis["true_height"],
     )
     if viz_outputs.get("overlay"):
         log(f"3D bounding boxes saved to {viz_outputs['overlay']}")

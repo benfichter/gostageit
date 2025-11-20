@@ -51,31 +51,30 @@ class Furniture3DVisualizer:
         y = (pts_3d[:, 1] / z) * fy + cy
         return np.stack([x, y], axis=1).astype(int)
 
-    def _build_box(self, points: np.ndarray) -> Optional[Tuple[np.ndarray, Dict[str, float]]]:
+    def _build_box(self, points: np.ndarray, room_height: float) -> Optional[Tuple[np.ndarray, Dict[str, float]]]:
         if len(points) < 10:
             return None
-        center = points.mean(axis=0)
-        centered = points - center
-        pca = PCA(n_components=3)
-        rotated = pca.fit_transform(centered)
-        min_pt = rotated.min(axis=0)
-        max_pt = rotated.max(axis=0)
-        corners = np.array([
-            [min_pt[0], min_pt[1], min_pt[2]],
-            [max_pt[0], min_pt[1], min_pt[2]],
-            [max_pt[0], min_pt[1], max_pt[2]],
-            [min_pt[0], min_pt[1], max_pt[2]],
-            [min_pt[0], max_pt[1], min_pt[2]],
-            [max_pt[0], max_pt[1], min_pt[2]],
-            [max_pt[0], max_pt[1], max_pt[2]],
-            [min_pt[0], max_pt[1], max_pt[2]],
-        ])
-        corners = pca.inverse_transform(corners) + center
-        dims = {
-            "width": float(max_pt[0] - min_pt[0]),
-            "height": float(max_pt[1] - min_pt[1]),
-            "depth": float(max_pt[2] - min_pt[2]),
-        }
+        pts = points.copy()
+        # Reduce influence of near-ceiling noise
+        pts[:, 1] = np.clip(pts[:, 1], np.min(pts[:, 1]), np.min(pts[:, 1]) + room_height)
+        width = float(np.max(pts[:, 0]) - np.min(pts[:, 0]))
+        depth = float(np.max(pts[:, 2]) - np.min(pts[:, 2]))
+        height = float(np.max(pts[:, 1]) - np.min(pts[:, 1]))
+        if width <= 0 or depth <= 0 or height <= 0:
+            return None
+        corners = np.array(
+            [
+                [np.min(pts[:, 0]), np.min(pts[:, 1]), np.min(pts[:, 2])],
+                [np.max(pts[:, 0]), np.min(pts[:, 1]), np.min(pts[:, 2])],
+                [np.max(pts[:, 0]), np.min(pts[:, 1]), np.max(pts[:, 2])],
+                [np.min(pts[:, 0]), np.min(pts[:, 1]), np.max(pts[:, 2])],
+                [np.min(pts[:, 0]), np.max(pts[:, 1]), np.min(pts[:, 2])],
+                [np.max(pts[:, 0]), np.max(pts[:, 1]), np.min(pts[:, 2])],
+                [np.max(pts[:, 0]), np.max(pts[:, 1]), np.max(pts[:, 2])],
+                [np.min(pts[:, 0]), np.max(pts[:, 1]), np.max(pts[:, 2])],
+            ]
+        )
+        dims = {"width": width, "height": height, "depth": depth}
         return corners, dims
 
     def build_boxes(
@@ -83,6 +82,7 @@ class Furniture3DVisualizer:
         image_rgb: np.ndarray,
         points_calibrated: np.ndarray,
         furniture_regions: List[Dict],
+        room_height: float,
     ) -> List[FurnitureBox]:
         boxes: List[FurnitureBox] = []
         for region in furniture_regions:
@@ -90,7 +90,7 @@ class Furniture3DVisualizer:
             if mask is None:
                 continue
             pts = points_calibrated[mask]
-            result = self._build_box(pts)
+            result = self._build_box(pts, room_height=region.get("room_height", room_height))
             if result is None:
                 continue
             corners_3d, dims = result
@@ -246,9 +246,12 @@ def integrate_3d_visualization(
     points_calibrated: np.ndarray,
     furniture_regions: List[Dict],
     output_dir: Path,
+    room_height: float,
 ) -> Dict[str, Optional[Path]]:
     visualizer = Furniture3DVisualizer()
-    boxes = visualizer.build_boxes(image_rgb, points_calibrated, furniture_regions)
+    boxes = visualizer.build_boxes(
+        image_rgb, points_calibrated, furniture_regions, room_height=room_height
+    )
     outputs = {"overlay": None, "spec": None, "comparison": None, "data": None}
     if not boxes:
         return outputs
