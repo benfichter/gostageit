@@ -14,14 +14,7 @@ import requests
 import torch
 import dotenv
 from moge.model.v2 import MoGeModel
-from furniture_detection import (
-    FurnitureDetector,
-    FurnitureDetectorUnavailable,
-)
-from sam_subject_extractor import (
-    SamSubjectExtractor,
-    SubjectExtractorUnavailable,
-)
+from furniture_detection import FurnitureDetector
 from furniture_3d_visualization import integrate_3d_visualization
 
 try:
@@ -518,16 +511,11 @@ def annotate_furniture_boxes(
     log(f"Annotated furniture overlay saved to {output_path}")
 
 
-def save_sam_outline_visualization(
+def save_detection_overlay(
     image_rgb: np.ndarray,
     furniture_regions: List[Dict],
     output_path: Path,
 ) -> None:
-    if not furniture_regions:
-        cv2.imwrite(str(output_path), cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
-        log("No SAM furniture regions detected – saved staged image without outlines.")
-        return
-
     overlay = image_rgb.copy()
     color_palette = [
         (255, 99, 71),
@@ -538,18 +526,35 @@ def save_sam_outline_visualization(
         (0, 255, 255),
     ]
 
+    if not furniture_regions:
+        cv2.imwrite(str(output_path), cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
+        log("No furniture regions detected – saved staged image without overlays.")
+        return
+
     for idx, region in enumerate(furniture_regions, start=1):
-        contour = region.get("contour")
-        if not contour:
-            continue
         color = color_palette[(idx - 1) % len(color_palette)]
-        pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
-        cv2.polylines(overlay, [pts], True, color, 2, cv2.LINE_AA)
-        text_origin = tuple(pts[0, 0])
+        contour = region.get("contour")
+        if contour:
+            pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
+            cv2.polylines(overlay, [pts], True, color, 2, cv2.LINE_AA)
+            anchor = tuple(pts[0, 0])
+        else:
+            bbox = region["pixel_bbox"]
+            cv2.rectangle(
+                overlay,
+                (bbox["x1"], bbox["y1"]),
+                (bbox["x2"], bbox["y2"]),
+                color,
+                2,
+                cv2.LINE_AA,
+            )
+            anchor = (bbox["x1"], max(20, bbox["y1"] - 10))
+
+        label = str(region.get("region_id", idx))
         cv2.putText(
             overlay,
-            f"SAM {idx}",
-            text_origin,
+            f"Region {label}",
+            anchor,
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
             color,
@@ -558,10 +563,10 @@ def save_sam_outline_visualization(
         )
 
     cv2.imwrite(str(output_path), cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
-    log(f"SAM outline visualization saved to {output_path}")
+    log(f"Furniture detection overlay saved to {output_path}")
 
 
-def render_numbered_sam_overlay(
+def render_numbered_detection_overlay(
     image_rgb: np.ndarray, furniture_regions: List[Dict]
 ) -> np.ndarray:
     overlay = image_rgb.copy()
@@ -575,13 +580,25 @@ def render_numbered_sam_overlay(
     ]
     for idx, region in enumerate(furniture_regions):
         contour = region.get("contour")
-        if not contour:
-            continue
-        pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
-        pts = cv2.convexHull(pts)
         color = colors[idx % len(colors)]
-        cv2.polylines(overlay, [pts], True, color, 2, cv2.LINE_AA)
-        centroid = np.mean(np.array(contour), axis=0).astype(int)
+        if contour:
+            pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
+            pts = cv2.convexHull(pts)
+            cv2.polylines(overlay, [pts], True, color, 2, cv2.LINE_AA)
+            centroid = np.mean(np.array(contour), axis=0).astype(int)
+        else:
+            bbox = region["pixel_bbox"]
+            cv2.rectangle(
+                overlay,
+                (bbox["x1"], bbox["y1"]),
+                (bbox["x2"], bbox["y2"]),
+                color,
+                2,
+                cv2.LINE_AA,
+            )
+            centroid = np.array(
+                [(bbox["x1"] + bbox["x2"]) / 2, (bbox["y1"] + bbox["y2"]) / 2]
+            ).astype(int)
         label = f"{region.get('region_id', idx + 1)}"
         cv2.putText(
             overlay,
@@ -694,11 +711,11 @@ def select_regions_via_gemini(
         log_fn(f"Failed to initialize Gemini client: {exc}")
         return None
 
-    overlay = render_numbered_sam_overlay(image_rgb, furniture_regions)
+    overlay = render_numbered_detection_overlay(image_rgb, furniture_regions)
     try:
         overlay_bytes = encode_image_png(overlay)
     except Exception as exc:
-        log_fn(f"Failed to encode SAM overlay for Gemini selection: {exc}")
+        log_fn(f"Failed to encode detection overlay for Gemini selection: {exc}")
         return None
 
     summaries = []
@@ -711,7 +728,7 @@ def select_regions_via_gemini(
         )
 
     prompt = (
-        "You are an interior designer. The image shows a staged room with numbered SAM masks. "
+        "You are an interior designer. The image shows a staged room with numbered geometry detections. "
         "Select the five most important furniture pieces (sofas, area rug, coffee table, TV/media console, built-in shelves/cabinets if present). "
         "If a rug is partially visible, still include it. Never select walls, windows, doors, or lamps. "
         "Return JSON like {\"selected_items\": [{\"region_id\": 3, \"label\": \"left sofa\"}, ...]}. "
@@ -891,41 +908,6 @@ def save_surface_visualization(
     log(f"Surface detection visualization saved to {output_path}")
 
 
-_SAM_EXTRACTOR: Optional[SamSubjectExtractor] = None
-
-
-def get_sam_extractor(
-    device: Optional[torch.device] = None,
-) -> Optional[SamSubjectExtractor]:
-    """
-    Lazily initialize Segment Anything subject extraction if configured.
-    """
-    global _SAM_EXTRACTOR
-    if _SAM_EXTRACTOR is False:
-        return None
-    if _SAM_EXTRACTOR is None:
-        checkpoint = os.getenv("SAM_CHECKPOINT_PATH")
-        if not checkpoint:
-            log("SAM subject extraction disabled: SAM_CHECKPOINT_PATH not set.")
-            _SAM_EXTRACTOR = False
-            return None
-        model_type = os.getenv("SAM_MODEL_TYPE", "vit_h")
-        target_device = device or torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu"
-        )
-        try:
-            _SAM_EXTRACTOR = SamSubjectExtractor(
-                checkpoint_path=Path(checkpoint),
-                model_type=model_type,
-                device=target_device,
-                log_fn=log,
-            )
-        except SubjectExtractorUnavailable as exc:
-            log(f"SAM subject extraction unavailable: {exc}")
-            _SAM_EXTRACTOR = False
-    return _SAM_EXTRACTOR or None
-
-
 def run_bfl_pipeline(
     image_path: Path,
     style_prompt: str,
@@ -960,19 +942,7 @@ def run_bfl_pipeline(
     overall_start = time.perf_counter()
     log("Starting BFL staging pipeline")
     log(f"Input image: {image_path}")
-    sam_extractor = get_sam_extractor(device=resolved_device)
-    if sam_extractor is None:
-        raise RuntimeError(
-            "SAM-based furniture detection requires SAM_CHECKPOINT_PATH. "
-            "Please download a SAM checkpoint and set SAM_CHECKPOINT_PATH before running."
-        )
-    try:
-        furniture_detector = FurnitureDetector(
-            sam_extractor=sam_extractor,
-            log_fn=log,
-        )
-    except FurnitureDetectorUnavailable as exc:
-        raise RuntimeError(f"SAM furniture detector unavailable: {exc}") from exc
+    furniture_detector = FurnitureDetector(log_fn=log)
 
     original_analysis = run_moge_analysis(
         model=model,
@@ -1021,21 +991,12 @@ def run_bfl_pipeline(
         output_path=staged_surface_path,
     )
 
-    if sam_extractor:
-        subject_outputs = sam_extractor.save_subject_assets(
-            image_rgb=staged_analysis["image_rgb"],
-            output_dir=output_dir,
-            stem=staged_path.stem,
-        )
-        if subject_outputs:
-            log(f"SAM subject mask saved to {subject_outputs.mask_path}")
-            log(f"SAM subject cutout saved to {subject_outputs.cutout_path}")
-
     furniture_regions = furniture_detector.detect(
         image_rgb=staged_analysis["image_rgb"],
         points_calibrated=staged_analysis["points_calibrated"],
         depth_mask=staged_analysis["mask"],
         normals=staged_analysis["normals"],
+        room_height=staged_analysis["true_height"],
     )
 
     selected_items = select_regions_via_gemini(
@@ -1044,11 +1005,11 @@ def run_bfl_pipeline(
         log_fn=log,
     )
 
-    sam_outline_path = output_dir / f"{image_path.stem}_sam_outlines.png"
-    save_sam_outline_visualization(
+    detection_overlay_path = output_dir / f"{image_path.stem}_detections.png"
+    save_detection_overlay(
         image_rgb=staged_analysis["image_rgb"],
         furniture_regions=furniture_regions,
-        output_path=sam_outline_path,
+        output_path=detection_overlay_path,
     )
 
     primary_dims_path = output_dir / f"{image_path.stem}_key_furniture_dimensions.png"

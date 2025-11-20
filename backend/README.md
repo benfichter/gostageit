@@ -131,29 +131,17 @@ Example Kontext request body (the script fills this in automatically using your 
 
 ### Furniture bounding boxes via MoGe (default)
 
-Furniture segmentation now relies on Meta's Segment Anything (SAM) while MoGe remains the source of metric truth. The flow:
+Furniture segmentation is now purely geometry-driven—no SAM checkpoints or extra downloads required. The detector:
 
-1. Run SAM on the staged render to obtain dozens of object masks (no cloud APIs required).
-2. Filter masks by size/overlap and keep up to 15 furniture segments.
-3. Use MoGe's calibrated point cloud inside each segment to compute width × depth × height plus centers.
-4. Draw the actual SAM contour (not just a rectangular box) on the overlay/comparison outputs so angled rugs, shelves, etc. follow their true edges.
-
-To enable it:
-
-```bash
-pip install -r backend/requirements.txt                      # installs SAM repo
-export SAM_CHECKPOINT_PATH=/workspace/sam_vit_h_4b8939.pth   # download from SAM release notes
-# Optional override: vit_h (default), vit_l, or vit_b
-export SAM_MODEL_TYPE=vit_h
-```
-
-If `SAM_CHECKPOINT_PATH` is missing the pipeline aborts before staging, since SAM now provides every furniture mask.
+1. Uses MoGe normals to carve out the floor, ceiling, and planar walls.
+2. Clusters the remaining calibrated points (plus depth discontinuities) into connected components.
+3. Filters clusters by physical size and point-count to reject artifacts.
+4. Measures width × depth × height directly from the calibrated points and fits PCA-aligned cuboids for visualization.
 
 Outputs from this step include:
 
-- `*_sam_outlines.png` – SAM mask contours drawn directly on the staged photo (no MoGe dimensions), useful to inspect the raw segmentation before measurement.
-- `*_key_furniture_dimensions.png` – annotations for the key furniture (rug, table, sofas, TV console / shelves) with MoGe W×D×H values rendered along the SAM contours. If you set `GOOGLE_API_KEY`, Gemini chooses the five most important SAM regions; otherwise we fall back to heuristics.
-- `*_subject_mask.png` / `*_subject_overlay.png` / `*_subject.png` – Apple-style cutouts driven by the same SAM run.
+- `*_detections.png` – depth-based overlay that numbers every detected furniture blob.
+- `*_key_furniture_dimensions.png` – annotations for the key furniture (rug, table, sofas, TV console / shelves) with MoGe W×D×H values rendered next to the detections. If you set `GOOGLE_API_KEY`, Gemini chooses the five most important regions; otherwise we fall back to heuristics.
 
 Optional Gemini setup for key-item selection:
 
@@ -166,12 +154,12 @@ export GOOGLE_API_KEY=sk-your-genai-key
 # export GEMINI_SELECTION_MODEL=gemini-1.5-flash
 ```
 
-With that in place, the pipeline uploads a numbered SAM overlay and candidate metadata, asks Gemini to choose the five most important furniture items, and only labels those pieces.
+With that in place, the pipeline uploads a numbered geometry overlay and candidate metadata, asks Gemini to choose the five most important furniture items, and only labels those pieces.
 The JSON response should look like `{"selected_items": [{"region_id": 4, "label": "main sofa"}, ...]}`; those labels show up verbatim on `_key_furniture_dimensions.png`.
 
 ### 3D furniture outlines
 
-After SAM segments each furniture cluster, we project the calibrated 3D bounding boxes back into the staged photo. This produces perspective-correct outlines - even for angled rugs or tall shelves - and the pipeline writes:
+After MoGe segments each furniture cluster, we project the calibrated 3D bounding boxes back into the staged photo. This produces perspective-correct outlines - even for angled rugs or tall shelves - and the pipeline writes:
 
 - `*_3d_boxes.png` – staged image with 3D wireframes
 - `*_3d_data.json` – list of centers/corners/metrics for every furniture box
@@ -180,16 +168,6 @@ Optional extras:
 
 - `pip install alphashape` to tighten outlines for irregular objects
 - `pip install open3d` to emit meshes/PLY files (hooks live in `furniture_3d_visualization.py`)
-
-### Subject lift via Segment Anything
-
-With the same SAM configuration above, the pipeline can also emit Apple-style "hold to lift subject" assets for each staged render. After staging it produces:
-
-- `*_subject_mask.png` - the binary segmentation mask
-- `*_subject_overlay.png` - staged render with everything but the main subject dimmed
-- `*_subject.png` - RGBA cutout you can drag/drop similar to iOS Photos
-
-If SAM is unavailable the subject cutouts are skipped (and, now that detection depends on SAM, the main pipeline will stop early with a helpful message).
 
 ---
 
