@@ -51,27 +51,34 @@ class Furniture3DVisualizer:
         y = (pts_3d[:, 1] / z) * fy + cy
         return np.stack([x, y], axis=1).astype(int)
 
-    def _build_box(self, points: np.ndarray, room_height: float) -> Optional[Tuple[np.ndarray, Dict[str, float]]]:
+    def _build_box(
+        self, points: np.ndarray, room_height: float, floor_y: Optional[float] = None
+    ) -> Optional[Tuple[np.ndarray, Dict[str, float]]]:
         if len(points) < 10:
             return None
         pts = points.copy()
-        # Reduce influence of near-ceiling noise
-        pts[:, 1] = np.clip(pts[:, 1], np.min(pts[:, 1]), np.min(pts[:, 1]) + room_height)
-        width = float(np.max(pts[:, 0]) - np.min(pts[:, 0]))
-        depth = float(np.max(pts[:, 2]) - np.min(pts[:, 2]))
-        height = float(np.max(pts[:, 1]) - np.min(pts[:, 1]))
+        base_floor = float(floor_y if floor_y is not None else np.percentile(pts[:, 1], 95))
+        y10 = np.percentile(pts[:, 1], 10)
+        y90 = np.percentile(pts[:, 1], 90)
+        base_y = min(y90, base_floor)
+        top_y = min(base_y + room_height, max(y10, y90))
+        x_min, x_max = np.min(pts[:, 0]), np.max(pts[:, 0])
+        z_min, z_max = np.min(pts[:, 2]), np.max(pts[:, 2])
+        width = float(max(x_max - x_min, 1e-3))
+        depth = float(max(z_max - z_min, 1e-3))
+        height = float(max(top_y - base_y, 1e-3))
         if width <= 0 or depth <= 0 or height <= 0:
             return None
         corners = np.array(
             [
-                [np.min(pts[:, 0]), np.min(pts[:, 1]), np.min(pts[:, 2])],
-                [np.max(pts[:, 0]), np.min(pts[:, 1]), np.min(pts[:, 2])],
-                [np.max(pts[:, 0]), np.min(pts[:, 1]), np.max(pts[:, 2])],
-                [np.min(pts[:, 0]), np.min(pts[:, 1]), np.max(pts[:, 2])],
-                [np.min(pts[:, 0]), np.max(pts[:, 1]), np.min(pts[:, 2])],
-                [np.max(pts[:, 0]), np.max(pts[:, 1]), np.min(pts[:, 2])],
-                [np.max(pts[:, 0]), np.max(pts[:, 1]), np.max(pts[:, 2])],
-                [np.min(pts[:, 0]), np.max(pts[:, 1]), np.max(pts[:, 2])],
+                [x_min, base_y, z_min],
+                [x_max, base_y, z_min],
+                [x_max, base_y, z_max],
+                [x_min, base_y, z_max],
+                [x_min, top_y, z_min],
+                [x_max, top_y, z_min],
+                [x_max, top_y, z_max],
+                [x_min, top_y, z_max],
             ]
         )
         dims = {"width": width, "height": height, "depth": depth}
